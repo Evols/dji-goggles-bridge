@@ -351,8 +351,19 @@ including tag pushes. After the test matrix passes, it calls the reusable
 and macOS Intel archives on native runners. Packaging or executable startup
 failures fail the CI run. The resulting archives are uploaded as downloadable
 workflow artifacts. You can also run **build applications** manually.
-It does not publish a GitHub Release automatically.
 Standard GitHub-hosted runners are free for public repositories.
+
+Publishing a GitHub Release (including a prerelease) starts the
+**release applications** workflow. It builds the released tag and attaches:
+
+- `dji-goggles-bridge-windows-x86_64.zip`
+- `dji-goggles-bridge-macos-arm64.tar.gz`
+- `dji-goggles-bridge-macos-x86_64.tar.gz`
+
+The archives appear under the release's **Assets** after all three builds
+succeed. Re-running the release workflow replaces these assets with the rebuilt
+archives. The workflow attaches files to the published release; it does not
+create a release or tag.
 
 macOS builds use PyInstaller's free ad-hoc signing and are not notarized.
 Downloaded builds may require a first-launch approval in **System Settings >

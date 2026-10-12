@@ -1,0 +1,45 @@
+name: release applications
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.release.id }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build release artifacts
+    uses: ./.github/workflows/build.yml
+
+  attach-assets:
+    name: Attach application archives
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Upload archives to the published release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          assets=(
+            release-assets/dji-goggles-bridge-windows-x86_64.zip
+            release-assets/dji-goggles-bridge-macos-arm64.tar.gz
+            release-assets/dji-goggles-bridge-macos-x86_64.tar.gz
+          )
+          for asset in "${assets[@]}"; do
+            test -s "$asset"
+          done
+          gh release upload "$RELEASE_TAG" "${assets[@]}" \
+            --repo "$GITHUB_REPOSITORY" --clobber
