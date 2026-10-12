@@ -6,7 +6,7 @@ import socket
 import unittest
 from unittest.mock import patch
 
-import server
+from apps import server
 
 try:
     import av

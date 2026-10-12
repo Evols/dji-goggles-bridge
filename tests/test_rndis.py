@@ -3,10 +3,12 @@
 import queue
 import socket
 import struct
+import sys
 import time
 import unittest
-from types import SimpleNamespace
-from unittest.mock import patch
+from pathlib import Path
+from types import ModuleType, SimpleNamespace
+from unittest.mock import Mock, patch
 
 from helpers import video, wire
 
@@ -363,6 +365,37 @@ class USBPeer:
             claim_interface=claim, release_interface=release, dispose_resources=dispose
         )
         return RndisUSB(self, CORE, util)
+
+
+class BackendDiscoveryTests(unittest.TestCase):
+    def test_bundled_libusb_is_used_without_a_system_installation(self):
+        usb = ModuleType("usb")
+        usb.backend = ModuleType("usb.backend")
+        usb.backend.libusb1 = ModuleType("usb.backend.libusb1")
+        usb.core = ModuleType("usb.core")
+        usb.util = ModuleType("usb.util")
+        backend = object()
+        usb.backend.libusb1.get_backend = Mock(side_effect=[None, backend])
+        usb.core.find = Mock(return_value=[])
+        library = Path("bundled-runtime/libusb-1.0.0.dylib")
+        modules = {
+            "usb": usb,
+            "usb.backend": usb.backend,
+            "usb.backend.libusb1": usb.backend.libusb1,
+            "usb.core": usb.core,
+            "usb.util": usb.util,
+        }
+        with (
+            patch.dict(sys.modules, modules),
+            patch.object(sys, "_MEIPASS", "bundled-runtime", create=True),
+            patch.object(Path, "glob", return_value=[library]),
+            patch.object(Path, "is_file", return_value=True),
+            self.assertRaisesRegex(RndisError, "Goggles 3 USB device not found"),
+        ):
+            RndisUSB.open()
+        callback = usb.backend.libusb1.get_backend.call_args.kwargs["find_library"]
+        self.assertEqual(callback("usb-1.0"), str(library))
+        self.assertIs(usb.core.find.call_args.kwargs["backend"], backend)
 
 
 class USBTests(unittest.TestCase):

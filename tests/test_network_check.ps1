@@ -1,7 +1,7 @@
 # Synthetic Windows network-check tests. These mock all hardware reads and
 # never touch actual adapters. Run: powershell -File tests/test_network_check.ps1
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot '../network_check.ps1')
+. (Join-Path $PSScriptRoot '../src/apps/goggles_resources/network_check.ps1')
 
 function Get-CimInstance { param($ClassName) return $script:Devices }
 function Get-NetAdapter { param([switch]$IncludeHidden) return $script:Adapters }
@@ -55,7 +55,7 @@ Assert-Result 'Ambiguous multiple headsets rejected' 1
 # driver-installation or adapter-changing commands without an explicit redesign.
 $tokens = $null
 $parseErrors = $null
-$ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../network_check.ps1'), [ref]$tokens, [ref]$parseErrors)
+$ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../src/apps/goggles_resources/network_check.ps1'), [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count) { throw 'PowerShell helper contains syntax errors' }
 $banned = @('Start-Process', 'Set-NetIPInterface', 'New-NetIPAddress', 'Remove-NetIPAddress',
             'Remove-NetRoute', 'Set-NetRoute', 'Set-DnsClientServerAddress', 'pnputil', 'netsh')

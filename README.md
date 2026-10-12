@@ -17,8 +17,9 @@ If you build something using this code, I encourage you to keep it free
 
 ## Headset setup (before either launcher)
 
-1. Install [Python](https://www.python.org/downloads/) 3.10 or newer if needed.
-   On Windows, enable the PATH option during installation.
+1. When running from source, install [Python](https://www.python.org/downloads/)
+   3.10 or newer. On Windows, enable the PATH option during installation.
+   Packaged applications already include Python and the video libraries.
 2. Power on the goggles and connect them to the computer with a USB-C **data** cable.
 3. In the goggles open **Settings > About > OTG Wired Connection to Computer**
    and turn it **on**. Confirm the headset shows **OTG Wired Connection - Connected**.
@@ -29,23 +30,62 @@ If you build something using this code, I encourage you to keep it free
    Without an aircraft, open **Settings > Camera > Advanced Camera Settings >
    Camera View Recording** and turn it on to stream the goggles' screen instead.
    Turn Camera View Recording off again for a flight view with less OSD.
-6. Close other applications accessing the goggles. Windows launchers check
+6. Close other applications accessing the goggles. The Windows launcher checks
    the USB network adapter before starting. macOS uses userspace USB directly.
 
 The viewer displays what the headset transmits, including menus/OSD if present.
 
-## macOS: userspace USB RNDIS
+## Console launchers (Windows and macOS)
+
+Both platform launchers offer a console menu: **1** opens the video viewer,
+**2** starts the VLC/OBS frame server, and **Q** quits. Press Enter to choose
+the viewer. To skip the menu, pass `viewer` or `server`, followed by any receiver
+options. The viewer stops with **Q**, **Escape**, or closing its window; the
+server stops with **Ctrl+C**. Close one receiver before starting another.
+
+### Windows
+
+After the headset setup above, run from this folder:
+
+```bat
+python src\apps\windows_app.py
+python src\apps\windows_app.py viewer
+python src\apps\windows_app.py server --host 127.0.0.1 --port 5600
+```
+
+The launcher prints the setup steps and checks the goggles' USB network adapter
+before starting either mode. If dependencies are missing, it creates/reuses
+`.venv` and installs the `apps` dependencies there. Internet may be needed for
+this first setup. It does not change network settings or install drivers.
+
+The packaged equivalent is **`dji-goggles-bridge-windows.exe`**. Double-click it
+for the menu, or run it from a terminal with the same mode and options. It
+includes dependencies and the network checker; no Python installation or pip
+setup is needed on the receiving PC.
+
+### macOS: userspace USB RNDIS
 
 Complete the headset setup above, including **Wi-Fi sharing** even when using
-Camera View Recording. From this folder:
+Camera View Recording. For source runs, install libusb once, then launch:
 
 ```sh
 brew install libusb
-python3 -m venv .venv
-.venv/bin/python -m pip install -e ".[apps]"
-.venv/bin/python viewer.py
-# Or, separately, send video to VLC/OBS:
-.venv/bin/python server.py
+python3 src/apps/mac_app.py
+python3 src/apps/mac_app.py viewer
+python3 src/apps/mac_app.py server
+```
+
+Missing Python dependencies are installed into `.venv` on first use, just as on
+Windows. The packaged **`dji-goggles-bridge-macos`** console executable includes
+Python, the video dependencies, PyUSB, and libusb in a single file. Homebrew and
+a separate libusb installation are not needed to run it. Extract the downloaded
+archive and run it from Terminal. It accepts the same menu, modes, and options
+as `mac_app.py`:
+
+```sh
+cd dji-goggles-bridge-macos
+./dji-goggles-bridge-macos
+./dji-goggles-bridge-macos server
 ```
 
 The default `auto` transport selects userspace USB on macOS. It claims the
@@ -77,14 +117,6 @@ while waiting for video. If the stream times out or USB disconnects, it keeps
 the window open and retries the session after one second. The SDK itself still
 reports errors to callers and does not reconnect automatically.
 
-## Just show me the video (Windows)
-
-Double-click **video.cmd** after the headset setup above. Press **Q**, **Escape**,
-or close the video window to stop.
-
-Both launchers print the setup steps and install dependencies into this
-project's `.venv` folder on first use. They do not alter network settings.
-
 ## What is Remote NDIS?
 
 The goggles present themselves to Windows as a **USB network adapter**, usually
@@ -104,11 +136,11 @@ Those addresses let the PC send the video handshake to the goggles. A gateway
 is unnecessary for the direct USB link. Configure **the goggles' USB adapter**;
 your usual Internet Ethernet/Wi-Fi adapter is a different interface.
 
-**Both launchers check detection and IP settings before installing Python
+**The Windows launcher checks detection and IP settings before installing Python
 packages or opening the receiver.**
-If everything is ready, they continue. If the
-adapter is missing, they stop with cable/OTG/Device Manager instructions. If its
-IP is wrong, they stop and print the exact manual setup steps below. They do
+If everything is ready, it continues. If the
+adapter is missing, it stops with cable/OTG/Device Manager instructions. If its
+IP is wrong, it stops and prints the exact manual setup steps below. It does
 not install drivers or change network settings automatically.
 
 Windows may request administrator permission when changing an adapter's IP
@@ -146,8 +178,9 @@ as the goggles. Another firmware/device identity requires manual investigation.
 
 ## Frame server for VLC or OBS
 
-Double-click **server.cmd** after completing the same headset setup. Keep its
-terminal open; **Ctrl+C** stops the server. It sends **H.264 video in MPEG-TS
+Choose **2** in the platform launcher's menu, or pass `server`, after completing
+the same headset setup. Keep its terminal open; **Ctrl+C** stops the server.
+It sends **H.264 video in MPEG-TS
 packets over UDP** to this computer on port **5600**. No browser is involved.
 
 ### VLC
@@ -175,7 +208,9 @@ Use VLC **or** OBS on the default UDP port. Two local players can compete for
 that same receive port. Stop the video-window receiver before starting the
 frame server; only one receiver should own the headset session.
 
-For a player on another PC, run `python server.py --host OTHER_PC_IP --port 5600`.
+For a player on another PC, run
+`python src/apps/windows_app.py server --host OTHER_PC_IP --port 5600`
+(use `python3 src/apps/mac_app.py` on macOS).
 The player receives on its own port 5600; allow that UDP traffic on the receiving
 PC if required. On this PC, the default destination is `127.0.0.1`.
 
@@ -188,9 +223,9 @@ From this folder:
 
 ```sh
 python -m pip install ".[apps]"
-python viewer.py
+python src/apps/viewer.py
 # Or, separately:
-python server.py
+python src/apps/server.py
 ```
 
 Prefer a virtual environment if installing manually. Windows and Linux use
@@ -202,9 +237,9 @@ The server also accepts `--host` and `--port` for the media player destination.
 
 ## Use the tiny SDK in your own code
 
-The SDK entry point is **[dji_goggles_bridge.py](dji_goggles_bridge.py)**. Copy it
+The SDK entry point is **[src/dji_goggles_bridge.py](src/dji_goggles_bridge.py)**. Copy it
 next to your Python program, or install this project. Include
-**[rndis.py](rndis.py)** and install PyUSB/libusb when using userspace USB.
+**[src/rndis.py](src/rndis.py)** and install PyUSB/libusb when using userspace USB.
 
 Read unchanged H.264 bytes (standard library for UDP; `usb` extra for macOS):
 
@@ -254,17 +289,73 @@ it does not provide general Internet access or a system network interface.
 
 | File | Purpose |
 | --- | --- |
-| [dji_goggles_bridge.py](dji_goggles_bridge.py) | SDK: packet bytes, ACK windows, fragments, decoder, session |
-| [rndis.py](rndis.py) | Userspace RNDIS control/data, Ethernet, ARP, IPv4/UDP transport |
-| [viewer.py](viewer.py) | Small OpenCV window using `goggles.frames()` |
-| [server.py](server.py) | H.264/MPEG-TS UDP output using the same `goggles.frames()` |
+| [src/dji_goggles_bridge.py](src/dji_goggles_bridge.py) | SDK: packet bytes, ACK windows, fragments, decoder, session |
+| [src/rndis.py](src/rndis.py) | Userspace RNDIS control/data, Ethernet, ARP, IPv4/UDP transport |
+| [src/apps/viewer.py](src/apps/viewer.py) | Small OpenCV window using `goggles.frames()` |
+| [src/apps/server.py](src/apps/server.py) | H.264/MPEG-TS UDP output using the same `goggles.frames()` |
+| [src/apps/windows_app.py](src/apps/windows_app.py) | Windows console menu, setup, network check and receiver modes |
+| [src/apps/mac_app.py](src/apps/mac_app.py) | macOS console menu and userspace USB receiver modes |
+| [src/apps/app_launcher.py](src/apps/app_launcher.py) | Shared setup, dependency bootstrap and mode dispatch |
 | [PROTOCOL.md](PROTOCOL.md) | Byte layouts, handshake, ACKs, fragment flags, and evidence |
-| [network_check.ps1](network_check.ps1) | Read-only Windows adapter and IP check used by both launchers |
+| [src/apps/goggles_resources/network_check.ps1](src/apps/goggles_resources/network_check.ps1) | Bundled read-only Windows adapter and IP check |
+| [scripts/build.py](scripts/build.py) | Native Windows/macOS packaging and startup checks |
+| [scripts/server.spec](scripts/server.spec) | Optional PyInstaller specification for the standalone server |
+| [scripts/MANIFEST.in](scripts/MANIFEST.in) | Source-distribution file list, loaded by `scripts/packaging_commands.py` |
 | `tests/` | Synthetic tests; no headset or private footage required |
 
 Read the SDK's three commented sections in order to port it to another
 language: **wire protocol**, **optional decoding**, then **UDP session**.
 There is no crop, OSD removal, color processing, or other feature UI.
+
+## Build downloadable applications
+
+Build on the OS you are targeting, with Python 3.10 or newer installed.
+From the repository root, Windows builds use:
+
+```bat
+scripts\build_windows.cmd
+REM Or:
+python scripts\build.py
+```
+
+This creates **`dist/windows/dji-goggles-bridge-windows.exe`**, containing both
+receiver modes, and **`dist/dji-goggles-bridge-windows-x86_64.zip`** on x64 Python.
+
+On macOS:
+
+```sh
+brew install libusb
+sh scripts/build_macos.sh
+# Or:
+python3 scripts/build.py
+```
+
+This creates a single console executable at **`dist/macos/dji-goggles-bridge-macos`**
+and **`dist/dji-goggles-bridge-macos-arm64.tar.gz`** or
+**`dist/dji-goggles-bridge-macos-x86_64.tar.gz`**, matching the build interpreter's
+architecture. The archive contains the executable, README, and license, and
+preserves executable permissions. Embedded libraries, including libusb, are
+extracted to a temporary directory when the app starts and cleaned up on normal
+exit. This makes startup slightly slower than a directory bundle.
+
+The build script creates/reuses `.venv`, installs `apps` and `exe` dependencies,
+and packages the platform launcher using
+[PyInstaller](https://pyinstaller.org/en/stable/usage.html). Build files and
+generated specs stay under `build/`. Internet may be needed for the first build.
+Use `--skip-install` to rebuild with dependencies already installed.
+Every build checks launcher help and both receiver help commands without hardware.
+
+The **build applications** GitHub Actions workflow runs manually, on `v*` tags,
+and on pull requests changing application/build code. It builds Windows x64,
+macOS Apple Silicon, and macOS Intel archives on native runners and uploads
+them as workflow artifacts. It does not publish a GitHub Release automatically.
+Standard GitHub-hosted runners are free for public repositories.
+
+macOS builds use PyInstaller's free ad-hoc signing and are not notarized.
+Downloaded builds may require a first-launch approval in **System Settings >
+Privacy & Security > Open Anyway**. Developer ID signing and notarization can
+be added later; no Apple Developer credentials are required for these builds.
+See [Apple's opening instructions](https://support.apple.com/en-us/102445).
 
 ## Optional packaging and development
 
@@ -272,14 +363,16 @@ The files run directly; installing this project as a package is optional.
 For contributors or reusable wheels:
 
 ```sh
-python -m pip install -e ".[apps,dev]"
+python -m pip install -e ".[apps,dev,exe]"
 python -m unittest discover -s tests -v
 ruff check .
 ruff format --check .
 python -m build
 ```
 
-Installed commands are `goggles-view` and `goggles-serve`. The network UDP SDK has
+Installed commands are `goggles-view`, `goggles-serve`, `goggles-windows`, and
+`goggles-mac`. The first two directly run the receiver; the platform commands
+include the setup flow and menu. The network UDP SDK has
 no runtime dependencies (`pip install .`). USB uses the optional `usb` extra
 plus a system libusb installation; decoding uses the optional `decode` extra.
 The `apps` extra includes PyUSB on macOS. CI covers Windows, Linux, and macOS

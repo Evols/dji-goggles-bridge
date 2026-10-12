@@ -6,6 +6,10 @@ import queue
 import sys
 import threading
 import time
+from pathlib import Path
+
+if __package__ in (None, "") and not getattr(sys, "frozen", False):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from dji_goggles_bridge import ConnectionConfig, GogglesClient
 
@@ -190,7 +194,10 @@ def main(argv=None) -> int:
     try:
         import cv2
     except ImportError:
-        print('Run video.cmd or install with: python -m pip install ".[apps]"', file=sys.stderr)
+        print(
+            'Run the platform launcher or install with: python -m pip install ".[apps]"',
+            file=sys.stderr,
+        )
         return 1
     try:
         with GogglesClient(connection_config(args)) as goggles:

@@ -12,9 +12,13 @@ import itertools
 import sys
 import time
 from fractions import Fraction
+from pathlib import Path
 
+if __package__ in (None, "") and not getattr(sys, "frozen", False):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from apps.viewer import connection_arguments, connection_config
 from dji_goggles_bridge import GogglesClient
-from viewer import connection_arguments, connection_config
 
 
 def write_mpegts(frames, destination, *, fps: int = 30) -> int:
@@ -89,7 +93,10 @@ def main(argv=None) -> int:
     try:
         import av  # noqa: F401 -- Fail before opening the headset if not installed.
     except ImportError:
-        print("Run server.cmd or install av and numpy", file=sys.stderr)
+        print(
+            'Run the platform launcher or install with: python -m pip install ".[apps]"',
+            file=sys.stderr,
+        )
         return 1
     # Seven 188-byte transport packets fit in one 1316-byte UDP datagram,
     # keeping the output below the usual Ethernet MTU.

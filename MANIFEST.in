@@ -1,3 +1,0 @@
-include LICENSE README.md PROTOCOL.md video.cmd server.cmd network_check.ps1
-recursive-include tests *.py *.ps1
-recursive-include .github *.yml

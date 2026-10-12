@@ -1,0 +1,19 @@
+"""Windows console launcher with headset setup, network check and two modes."""
+
+import multiprocessing
+import sys
+from pathlib import Path
+
+if __package__ in (None, "") and not getattr(sys, "frozen", False):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from apps import app_launcher
+
+
+def main(argv=None) -> int:
+    return app_launcher.main("win32", argv)
+
+
+if __name__ == "__main__":
+    multiprocessing.freeze_support()
+    raise SystemExit(main())

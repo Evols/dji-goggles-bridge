@@ -272,7 +272,9 @@ def decode_h264(
         import av
         import numpy  # noqa: F401 -- Give missing NumPy the same useful error.
     except ImportError as exc:
-        raise ImportError("Install av and numpy, or run video.cmd; see README.md") from exc
+        raise ImportError(
+            "Install av and numpy, or run the platform launcher; see README.md"
+        ) from exc
 
     decoder = av.CodecContext.create("h264", "r")
     decoder.thread_count = 1

@@ -124,7 +124,7 @@ class ClientTests(unittest.TestCase):
             self.assertEqual(list(client.h264()), [])
 
     def test_raw_package_import_needs_no_site_packages(self):
-        source = Path(__file__).resolve().parents[1]
+        source = Path(__file__).resolve().parents[1] / "src"
         code = (
             f"import sys; sys.path.insert(0, {str(source)!r}); "
             "import dji_goggles_bridge; "

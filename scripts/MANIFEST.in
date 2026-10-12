@@ -1,0 +1,5 @@
+include LICENSE README.md PROTOCOL.md
+recursive-include scripts *.py *.cmd *.sh *.spec *.in
+recursive-include src *.py *.ps1
+recursive-include tests *.py *.ps1
+recursive-include .github *.yml

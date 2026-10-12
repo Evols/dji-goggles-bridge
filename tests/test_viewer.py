@@ -7,7 +7,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-import viewer
+from apps import viewer
 from dji_goggles_bridge import ConnectionConfig
 
 
@@ -60,7 +60,7 @@ class WindowTests(unittest.TestCase):
 
     def test_mac_entry_point_does_not_import_cv2_in_decoder_process(self):
         with (
-            patch("viewer.sys.platform", "darwin"),
+            patch("apps.viewer.sys.platform", "darwin"),
             patch.object(viewer, "_view_mac", return_value=0) as mac,
             patch.dict("sys.modules", {"cv2": None}),
         ):

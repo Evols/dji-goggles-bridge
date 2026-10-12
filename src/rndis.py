@@ -10,6 +10,7 @@ from __future__ import annotations
 import secrets
 import socket
 import struct
+import sys
 import time
 from collections import deque
 from pathlib import Path
@@ -89,10 +90,16 @@ class RndisUSB:
             raise RndisError('USB transport needs PyUSB: pip install ".[usb]"') from exc
         backend = usb.backend.libusb1.get_backend()
         if backend is None:
+            bundled = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
             # ctypes discovery does not always include Homebrew's library path.
-            for path in ("/opt/homebrew/lib/libusb-1.0.dylib", "/usr/local/lib/libusb-1.0.dylib"):
-                if Path(path).is_file():
-                    backend = usb.backend.libusb1.get_backend(find_library=lambda _: path)
+            paths = [
+                *sorted(bundled.glob("libusb-1.0*.dylib")),
+                Path("/opt/homebrew/lib/libusb-1.0.dylib"),
+                Path("/usr/local/lib/libusb-1.0.dylib"),
+            ]
+            for path in paths:
+                if path.is_file():
+                    backend = usb.backend.libusb1.get_backend(find_library=lambda _: str(path))
                     if backend is not None:
                         break
         if backend is None:
