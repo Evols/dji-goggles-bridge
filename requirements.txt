@@ -1,4 +1,0 @@
-# Only needed for decoding and the two applications; raw H.264 needs none.
-av>=14,<20
-numpy>=1.26,<3
-opencv-python>=4.10,<6

@@ -3,7 +3,7 @@
 Show your DJI Goggles 3 video on your computer, or share it through a small
 local frame server. You can also use the same code in your own programs.
 
-**Three Python files. No proprietary app, DLLs, firmware, or license keys.**
+**Windows, macOS, and Linux. No proprietary app, firmware, or license keys.**
 MIT licensed. Independent project, not affiliated with DJI.
 
 Existing solutions were either paid or required dedicated hardware.
@@ -17,9 +17,9 @@ If you build something using this code, I encourage you to keep it free
 
 ## Headset setup (before either launcher)
 
-1. Install [Python](https://www.python.org/downloads/windows/) if needed.
-   Use Python 3.10 or newer and enable the PATH option during installation.
-2. Power on the goggles and connect them to the PC with a USB-C **data** cable.
+1. Install [Python](https://www.python.org/downloads/) 3.10 or newer if needed.
+   On Windows, enable the PATH option during installation.
+2. Power on the goggles and connect them to the computer with a USB-C **data** cable.
 3. In the goggles open **Settings > About > OTG Wired Connection to Computer**
    and turn it **on**. Confirm the headset shows **OTG Wired Connection - Connected**.
 4. Press the **5D button down, towards you**, to open the shortcut menu.
@@ -29,11 +29,53 @@ If you build something using this code, I encourage you to keep it free
    Without an aircraft, open **Settings > Camera > Advanced Camera Settings >
    Camera View Recording** and turn it on to stream the goggles' screen instead.
    Turn Camera View Recording off again for a flight view with less OSD.
-6. Close other applications accessing the goggles. The launcher checks the
-   USB network adapter before starting; if it is not configured yet, follow
-   the printed instructions and the explanation below.
+6. Close other applications accessing the goggles. Windows launchers check
+   the USB network adapter before starting. macOS uses userspace USB directly.
 
 The viewer displays what the headset transmits, including menus/OSD if present.
+
+## macOS: userspace USB RNDIS
+
+Complete the headset setup above, including **Wi-Fi sharing** even when using
+Camera View Recording. From this folder:
+
+```sh
+brew install libusb
+python3 -m venv .venv
+.venv/bin/python -m pip install -e ".[apps]"
+.venv/bin/python viewer.py
+# Or, separately, send video to VLC/OBS:
+.venv/bin/python server.py
+```
+
+The default `auto` transport selects userspace USB on macOS. It claims the
+goggles' RNDIS interfaces via PyUSB/libusb and handles Ethernet, ARP, IPv4,
+and UDP inside this process. No RNDIS kernel extension, virtual network adapter,
+administrator privileges, or manual Mac IP settings are needed. The addresses
+`192.168.60.1` and `192.168.60.2` belong to this internal USB link.
+
+Keep one goggles receiver open at a time. The supported USB identity is
+`2ca3:0020` (Goggles 3). Close the viewer before starting the frame server.
+Use `--transport usb` to select USB explicitly, or `--transport udp` to use an
+existing OS network interface. `auto` uses network UDP for loopback peers.
+
+Raw H.264 over USB needs only the `usb` extra and libusb:
+
+```sh
+.venv/bin/python -m pip install -e ".[usb]"
+```
+
+If USB connects but no video arrives, check **Share Liveview to Mobile Device
+via Wi-Fi** in the goggles' shortcut menu. Camera View Recording alone does
+not enable the sharing session.
+
+On macOS the OpenCV window runs in a separate process from PyAV and the USB
+receiver, avoiding duplicate FFmpeg/AVFoundation library loading. The display
+queue holds at most one decoded picture; a slow window can skip pictures
+without dropping compressed data. The window keeps responding to Q/Escape
+while waiting for video. If the stream times out or USB disconnects, it keeps
+the window open and retries the session after one second. The SDK itself still
+reports errors to callers and does not reconnect automatically.
 
 ## Just show me the video (Windows)
 
@@ -145,24 +187,26 @@ References: [OBS Media Sources](https://obsproject.com/kb/media-sources),
 From this folder:
 
 ```sh
-python -m pip install -r requirements.txt
+python -m pip install ".[apps]"
 python viewer.py
 # Or, separately:
 python server.py
 ```
 
-Prefer a virtual environment if installing manually. Linux/macOS users also
-need their headset network interface configured; hardware has been tested
-on Windows only. `--help` lists connection options. Both programs accept
-`--local-ip`, `--headset-ip`, `--local-port`, and `--headset-port`.
+Prefer a virtual environment if installing manually. Windows and Linux use
+the OS RNDIS network interface by default; configure it as `192.168.60.1/24`.
+macOS uses userspace USB as described above. `--help` lists connection options.
+Both programs accept `--transport auto|udp|usb`, `--local-ip`, `--headset-ip`,
+`--local-port`, and `--headset-port`.
 The server also accepts `--host` and `--port` for the media player destination.
 
 ## Use the tiny SDK in your own code
 
-The SDK is **[dji_goggles_bridge.py](dji_goggles_bridge.py)**. Copy that one file
-next to your Python program, or import it directly from this folder.
+The SDK entry point is **[dji_goggles_bridge.py](dji_goggles_bridge.py)**. Copy it
+next to your Python program, or install this project. Include
+**[rndis.py](rndis.py)** and install PyUSB/libusb when using userspace USB.
 
-Read unchanged H.264 bytes (no third-party dependencies):
+Read unchanged H.264 bytes (standard library for UDP; `usb` extra for macOS):
 
 ```python
 from dji_goggles_bridge import GogglesClient
@@ -199,11 +243,19 @@ counters. A slow consumer fills a bounded queue and raises `BufferError` rather
 than silently discarding compressed data. Timeouts and connection errors also
 reach the reader. There is no automatic reconnect or camera-control API.
 
+To choose a transport explicitly, construct
+`GogglesClient(ConnectionConfig(transport="usb"))` or
+`GogglesClient(ConnectionConfig(transport="udp"))`, importing `ConnectionConfig`
+from `dji_goggles_bridge`. The video handshake, ACK logic and frame API are
+shared by both transports. The USB stack serves this one IPv4/UDP session;
+it does not provide general Internet access or a system network interface.
+
 ## Understand it / build a clone
 
 | File | Purpose |
 | --- | --- |
-| [dji_goggles_bridge.py](dji_goggles_bridge.py) | Whole SDK: packet bytes, ACK windows, fragments, decoder, UDP session |
+| [dji_goggles_bridge.py](dji_goggles_bridge.py) | SDK: packet bytes, ACK windows, fragments, decoder, session |
+| [rndis.py](rndis.py) | Userspace RNDIS control/data, Ethernet, ARP, IPv4/UDP transport |
 | [viewer.py](viewer.py) | Small OpenCV window using `goggles.frames()` |
 | [server.py](server.py) | H.264/MPEG-TS UDP output using the same `goggles.frames()` |
 | [PROTOCOL.md](PROTOCOL.md) | Byte layouts, handshake, ACKs, fragment flags, and evidence |
@@ -227,6 +279,9 @@ ruff format --check .
 python -m build
 ```
 
-Installed commands are `goggles-view` and `goggles-serve`. The raw-only SDK has
-no runtime dependencies (`pip install .`); decoded SDK dependencies are an
-optional `decode` extra. CI is configured for Windows/Linux and Python 3.10/3.12.
+Installed commands are `goggles-view` and `goggles-serve`. The network UDP SDK has
+no runtime dependencies (`pip install .`). USB uses the optional `usb` extra
+plus a system libusb installation; decoding uses the optional `decode` extra.
+The `apps` extra includes PyUSB on macOS. CI covers Windows, Linux, and macOS
+with Python 3.10, 3.12, and 3.14. Linux network support is covered synthetically;
+the macOS USB transport has also been exercised with connected Goggles 3.

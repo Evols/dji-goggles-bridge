@@ -38,6 +38,80 @@ original hardware probe. ACKs are required even when application code is busy.
 The SDK sends no type-5 command/telemetry requests and no aircraft commands.
 A new connection creates a new session; automatic reconnection is not included.
 
+## Userspace USB RNDIS (macOS)
+
+`rndis.py` implements the link below the same DJI UDP session. The tested
+Goggles 3 identity is USB `2ca3:0020`, configuration 1. Its composite layout is:
+
+| Interface | Function | Endpoints |
+| --- | --- | --- |
+| 0 | RNDIS control, class/subclass/protocol `e0/01/03` | interrupt IN `82` |
+| 1 | CDC Ethernet data, class `0a` | bulk IN `81`, bulk OUT `01` |
+
+The implementation discovers these interfaces through their class descriptors
+and the CDC Union descriptor. It claims only this pair, using the already
+active USB configuration. Other interfaces include mass storage and vendor
+bulk services. Resetting the composite device or changing its configuration
+would also affect those services, so neither is part of opening the transport.
+
+RNDIS control messages use `SEND_ENCAPSULATED_COMMAND` (class/interface OUT,
+`bmRequestType=21`, request `00`) and `GET_ENCAPSULATED_RESPONSE`
+(class/interface IN, `a1`, request `01`), with the control interface in
+`wIndex`. The interrupt endpoint signals a pending response. Completions must
+match the command's request ID and report success; unsolicited status
+indications and stale completions are skipped.
+
+The control sequence is:
+
+1. `REMOTE_NDIS_INITIALIZE_MSG`, version 1.0, receive transfer capacity 65536.
+2. Query `OID_802_3_CURRENT_ADDRESS` (`01010102`) for the host Ethernet address.
+3. Query `OID_GEN_MAXIMUM_FRAME_SIZE` (`00010106`) for the MTU.
+4. Set `OID_GEN_CURRENT_PACKET_FILTER` (`0001010e`) to `00000009`
+   (directed and broadcast).
+5. Send RNDIS keepalives every three seconds while receiving.
+6. Send best-effort `REMOTE_NDIS_HALT_MSG` and release interfaces on close.
+
+The connected device reported a 1500-byte MTU and a 1580-byte maximum host
+transfer. Bulk messages use the 44-byte `REMOTE_NDIS_PACKET_MSG` header;
+`DataOffset=36` is relative to byte 8, locating Ethernet at byte 44. A USB read
+can contain several messages; each `MessageLength` includes its alignment
+padding. An extra USB termination byte is allowed after the last message.
+Goggles 3 were observed sending a 512-byte RNDIS message followed by a nonzero
+byte (for example `8a`). The receiver ignores exactly one extra byte after a
+message ending on an endpoint packet boundary, regardless of its value. It
+still validates the RNDIS message lengths, data bounds, and other trailing
+bytes. Rejecting this byte discarded the same video fragment on each resend,
+stalling video after a few seconds or tens of seconds while type-1 status
+packets continued. Outgoing transfers ending on a full USB endpoint packet
+append a zero byte.
+
+Ethernet carries ARP address resolution and one IPv4/UDP peer pair. The host
+address is `192.168.60.1`, the goggles are `192.168.60.2`; no OS interface is
+created or configured. Incoming ARP requests for the host receive replies.
+The stack checks IPv4 and nonzero UDP checksums, validates lengths and filters
+the source/destination IPs and UDP ports. It reassembles IPv4 fragments with
+bounded storage and a one-second lifetime, rejecting overlaps. These are
+independent of the DJI video fragments described below. There is no DHCP,
+TCP, routing, or general network adapter service.
+
+The macOS transport was tested on connected Goggles 3 on October 12, 2026.
+It established RNDIS, resolved ARP, completed the DJI handshake, maintained
+ACKs, and decoded 591 1920×1080 frames in a 12-second run. The worker released
+USB on exit. Wi-Fi sharing must be enabled alongside Camera View Recording
+to obtain video; without sharing, this device replied to the handshake and
+sent type-1 status packets but no type-2 video.
+The live frame server also delivered 60 1920×1080 pictures over localhost UDP
+MPEG-TS, decoded by PyAV without the headset decoder's special flags.
+After correcting the USB termination-byte handling, the actual macOS viewer
+decoded 6002 frames during a continuous two-minute run without a stream timeout
+or duplicate-library warning. Its OpenCV display runs in a spawned process;
+USB reception and PyAV decoding share the parent process.
+
+RNDIS reference layouts:
+[initialize completion](https://learn.microsoft.com/en-us/windows-hardware/drivers/network/remote-ndis-initialize-cmplt),
+[query completion](https://learn.microsoft.com/en-us/windows-hardware/drivers/network/remote-ndis-query-cmplt),
+[packet message](https://learn.microsoft.com/en-us/windows-hardware/drivers/network/remote-ndis-packet-msg).
+
 ## Common eight-byte header
 
 | Offset | Bytes | Meaning |

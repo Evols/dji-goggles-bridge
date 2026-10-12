@@ -1,4 +1,4 @@
-"""The whole DJI Goggles 3 SDK in one file.
+"""DJI Goggles 3 video SDK, with network UDP and optional userspace USB RNDIS.
 
 Start with GogglesClient.h264() or GogglesClient.frames() in the README.
 For building a clone, read the sections below in order:
@@ -6,8 +6,9 @@ For building a clone, read the sections below in order:
   2. Optional H.264-to-NumPy decoding.
   3. UDP session and public SDK.
 
-The raw H.264 path needs only Python's standard library. PyAV and NumPy are
-imported only when you request decoded frames. No camera commands are sent.
+Network UDP needs only Python's standard library. The USB path uses rndis.py,
+PyUSB and libusb. PyAV and NumPy are imported only for decoded frames.
+No camera commands are sent.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ import queue
 import secrets
 import socket
 import struct
+import sys
 import threading
 import time
 from collections import Counter
@@ -27,6 +29,8 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import numpy as np
+
+    from rndis import RndisTransport
 
 __all__ = ["ConnectionConfig", "GogglesClient", "decode_h264"]
 
@@ -306,6 +310,12 @@ def decode_h264(
 
 @dataclass(frozen=True)
 class ConnectionConfig:
+    """auto uses USB on macOS, network UDP elsewhere (also for loopback peers).
+
+    USB addresses are internal to the userspace stack; they need not be
+    assigned to a macOS interface. Explicit udp/usb override auto selection.
+    """
+
     local_ip: str = "192.168.60.1"
     local_port: int = 12346
     headset_ip: str = "192.168.60.2"
@@ -314,8 +324,11 @@ class ConnectionConfig:
     idle_timeout: float = 5.0
     frame_timeout: float = 10.0
     queue_size: int = 128
+    transport: str = "auto"
 
     def __post_init__(self):
+        if self.transport not in ("auto", "udp", "usb"):
+            raise ValueError("transport must be auto, udp, or usb")
         if not 0 <= self.local_port <= 65535 or not 1 <= self.headset_port <= 65535:
             raise ValueError("Invalid UDP port")
         if min(self.handshake_timeout, self.idle_timeout, self.frame_timeout) <= 0:
@@ -344,7 +357,7 @@ class GogglesClient:
         self._stats: Counter[str] = Counter()
         self._error: Exception | None = None
         self._thread: threading.Thread | None = None
-        self._socket: socket.socket | None = None
+        self._socket: socket.socket | RndisTransport | None = None
         self._used = False
 
     @property
@@ -361,6 +374,28 @@ class GogglesClient:
         if self._used:
             raise RuntimeError("Client sessions are single-use; construct a new client")
         self._used = True
+        transport = self.config.transport
+        if transport == "auto":
+            transport = (
+                "usb"
+                if sys.platform == "darwin" and not self.config.headset_ip.startswith("127.")
+                else "udp"
+            )
+        if transport == "usb":
+            from rndis import RndisTransport
+
+            self._socket = RndisTransport(self.config)
+        else:
+            self._socket = self._open_udp()
+        self._thread = threading.Thread(target=self._receive, name="goggles-receive", daemon=True)
+        try:
+            self._thread.start()
+        except Exception:
+            self._socket.close()
+            raise
+        return self
+
+    def _open_udp(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
@@ -371,10 +406,7 @@ class GogglesClient:
         except Exception:
             sock.close()
             raise
-        self._socket = sock
-        self._thread = threading.Thread(target=self._receive, name="goggles-udp", daemon=True)
-        self._thread.start()
-        return self
+        return sock
 
     def close(self) -> None:
         self._stop.set()
@@ -452,7 +484,7 @@ class GogglesClient:
                 if not connected:
                     if now - started >= self.config.handshake_timeout:
                         raise TimeoutError(
-                            "No headset reply; check the RNDIS adapter address and OTG"
+                            "No headset reply; check OTG, LiveView sharing, and transport settings"
                         )
                     if now - last_handshake >= 1:
                         sock.send(build_handshake(self._session, self._seed))
