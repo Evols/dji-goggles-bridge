@@ -92,6 +92,48 @@ class FakeWindow:
 
 
 class RecoveryTests(unittest.TestCase):
+    def test_windows_q_cancels_the_reader_while_waiting_for_a_picture(self):
+        cancelled = threading.Event()
+
+        class WaitingPeer:
+            def __init__(self, config):
+                self.stats = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                self.close()
+
+            def close(self):
+                cancelled.set()
+
+            def frames(self):
+                if not cancelled.wait(0.5):
+                    raise AssertionError("Q must stop reception even before the first picture")
+                return
+                yield
+
+        cv2 = SimpleNamespace(
+            namedWindow=Mock(),
+            resizeWindow=Mock(),
+            imshow=Mock(),
+            waitKey=Mock(return_value=ord("q")),
+            getWindowProperty=Mock(return_value=1),
+            WINDOW_NORMAL=0,
+            WND_PROP_VISIBLE=1,
+        )
+        started = time.monotonic()
+        with (
+            patch.object(viewer, "GogglesClient", WaitingPeer),
+            patch("apps.diagnostics.usb_device_count", return_value=1),
+        ):
+            self.assertEqual(viewer._view_desktop(ConnectionConfig(), "test", cv2), 0)
+        self.assertTrue(cancelled.is_set())
+        self.assertLess(time.monotonic() - started, 0.5)
+        cv2.imshow.assert_not_called()
+        self.assertFalse(any(t.name == "goggles-pictures" for t in threading.enumerate()))
+
     def test_stalled_session_retries_and_displays_next_session(self):
         window = FakeWindow()
         sessions = []
@@ -119,6 +161,7 @@ class RecoveryTests(unittest.TestCase):
         with (
             patch.object(viewer, "MacWindow", return_value=window),
             patch.object(viewer, "GogglesClient", Peer),
+            patch("apps.diagnostics.usb_device_count", return_value=1),
         ):
             self.assertEqual(viewer._view_mac(ConnectionConfig(), "test"), 0)
         self.assertEqual(window.images, ["recovered image"])
@@ -153,6 +196,7 @@ class RecoveryTests(unittest.TestCase):
         with (
             patch.object(viewer, "MacWindow", return_value=window),
             patch.object(viewer, "GogglesClient", WaitingPeer),
+            patch("apps.diagnostics.usb_device_count", return_value=1),
         ):
             self.assertEqual(viewer._view_mac(ConnectionConfig(), "test"), 0)
         self.assertTrue(cancelled.is_set())

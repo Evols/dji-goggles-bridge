@@ -11,6 +11,8 @@ from pathlib import Path
 if __package__ in (None, "") and not getattr(sys, "frozen", False):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from apps.console import StatusPanel, save_error
+from apps.diagnostics import checked_frames
 from dji_goggles_bridge import ConnectionConfig, GogglesClient
 
 
@@ -139,10 +141,20 @@ class MacWindow:
 
 
 def _view_mac(config, title):
+    panel = StatusPanel()
+    notices = set()
+    try:
+        return _view_mac_sessions(config, title, panel, notices)
+    finally:
+        panel.close()
+
+
+def _view_mac_sessions(config, title, panel, notices):
     with MacWindow(title) as window:
         while not window.is_closed():
             try:
-                with GogglesClient(config) as goggles:
+                goggles = GogglesClient(config)
+                with checked_frames(goggles, config, panel=panel, notices=notices) as frames:
                     finished = threading.Event()
 
                     def watch_window():
@@ -153,7 +165,6 @@ def _view_mac(config, title):
 
                     watcher = threading.Thread(target=watch_window, daemon=True)
                     watcher.start()
-                    frames = goggles.frames()
                     try:
                         for frame in frames:
                             if not window.show(frame):
@@ -162,17 +173,70 @@ def _view_mac(config, title):
                         frames.close()
                         finished.set()
                         watcher.join(timeout=1)
-            except (TimeoutError, OSError) as exc:
+            except (TimeoutError, OSError):
                 if not window.is_closed():
-                    print(
-                        f"Viewer: {exc}. Retrying in 1 second; Q/Esc closes the window.",
-                        file=sys.stderr,
-                        flush=True,
-                    )
+                    panel.status("Goggles", "trying again...")
             if not window.is_closed():
                 window.closed.wait(1)
     if error := window.error():
         raise RuntimeError(error)
+    return 0
+
+
+class FrameReader:
+    """Keep receiving while the desktop window handles keys and close events."""
+
+    def __init__(self, frames):
+        self.frames = frames
+        self.latest = queue.Queue(maxsize=1)
+        self.stop = threading.Event()
+        self.done = threading.Event()
+        self.error = None
+        self.thread = threading.Thread(target=self._read, name="goggles-pictures", daemon=True)
+
+    def _read(self):
+        try:
+            for image in self.frames:
+                if self.stop.is_set():
+                    break
+                try:
+                    self.latest.get_nowait()
+                except queue.Empty:
+                    pass
+                self.latest.put_nowait(image)
+        except Exception as exc:
+            self.error = exc
+        finally:
+            self.done.set()
+
+
+def _view_desktop(config, title, cv2):
+    cv2.namedWindow(title, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(title, 1280, 720)
+    goggles = GogglesClient(config)
+    with checked_frames(goggles, config) as frames:
+        reader = FrameReader(frames)
+        reader.thread.start()
+        try:
+            while True:
+                if reader.done.is_set() and reader.latest.empty():
+                    if reader.error is not None:
+                        raise reader.error
+                    break
+                try:
+                    image = reader.latest.get(timeout=0.01)
+                except queue.Empty:
+                    pass
+                else:
+                    cv2.imshow(title, image)
+                if cv2.waitKey(1) & 0xFF in (ord("q"), 27):
+                    break
+                if cv2.getWindowProperty(title, cv2.WND_PROP_VISIBLE) < 1:
+                    break
+        finally:
+            reader.stop.set()
+            goggles.close()
+            reader.thread.join(timeout=2)
     return 0
 
 
@@ -189,7 +253,8 @@ def main(argv=None) -> int:
         except KeyboardInterrupt:
             return 0
         except Exception as exc:
-            print(f"Viewer: {exc}", file=sys.stderr)
+            save_error(exc)
+            print("Couldn't show the video. Follow the connection help above.", file=sys.stderr)
             return 1
     try:
         import cv2
@@ -200,19 +265,12 @@ def main(argv=None) -> int:
         )
         return 1
     try:
-        with GogglesClient(connection_config(args)) as goggles:
-            cv2.namedWindow(title, cv2.WINDOW_NORMAL)
-            cv2.resizeWindow(title, 1280, 720)
-            for frame in goggles.frames():
-                cv2.imshow(title, frame)
-                if cv2.waitKey(1) & 0xFF in (ord("q"), 27):
-                    break
-                if cv2.getWindowProperty(title, cv2.WND_PROP_VISIBLE) < 1:
-                    break
+        return _view_desktop(connection_config(args), title, cv2)
     except KeyboardInterrupt:
         pass
     except Exception as exc:
-        print(f"Viewer: {exc}", file=sys.stderr)
+        save_error(exc)
+        print("Couldn't show the video. Follow the connection help above.", file=sys.stderr)
         return 1
     finally:
         cv2.destroyAllWindows()

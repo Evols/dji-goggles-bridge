@@ -1,5 +1,6 @@
 """Console selection, read-only preflight and source/frozen dependency handling."""
 
+import io
 import subprocess
 import sys
 import unittest
@@ -44,17 +45,174 @@ class LauncherTests(unittest.TestCase):
         network.assert_not_called()
         receiver.assert_called_once_with(["--transport", "usb"])
 
-    def test_menu_defaults_to_viewer_and_can_quit_without_preflight(self):
+    def test_menu_defaults_to_viewer_and_checks_network_before_quitting(self):
         with patch("builtins.input", return_value=""):
             self.assertEqual(app_launcher.choose_mode(), "viewer")
         with (
             patch.object(sys, "platform", "win32"),
             patch.object(sys.stdin, "isatty", return_value=True),
             patch("builtins.input", return_value="q"),
-            patch.object(app_launcher, "check_windows_network") as network,
+            patch.object(app_launcher, "check_windows_network", return_value=0) as network,
         ):
             self.assertEqual(windows_app.main([]), 0)
-        network.assert_not_called()
+        network.assert_called_once()
+
+    def test_setup_warning_confirmation_and_recheck_precede_the_menu(self):
+        calls = []
+        output = io.StringIO()
+
+        def check():
+            calls.append("check")
+            return 2 if calls.count("check") == 1 else 0
+
+        def answer(prompt):
+            if "Set up" in prompt:
+                self.assertIn("system (UAC) prompt", output.getvalue())
+                calls.append("confirm")
+                return "yes"
+            self.assertEqual(calls, ["check", "confirm", "setup", "check"])
+            calls.append("menu")
+            return "q"
+
+        with (
+            patch.object(sys, "platform", "win32"),
+            patch.object(sys.stdin, "isatty", return_value=True),
+            patch.object(sys, "stdout", output),
+            patch.object(app_launcher, "check_windows_network", side_effect=check),
+            patch.object(
+                app_launcher,
+                "setup_windows_network",
+                side_effect=lambda: calls.append("setup") or 0,
+            ),
+            patch("builtins.input", side_effect=answer),
+            patch.object(app_launcher, "prepare_dependencies") as dependencies,
+        ):
+            self.assertEqual(windows_app.main([]), 0)
+        self.assertEqual(calls, ["check", "confirm", "setup", "check", "menu"])
+        dependencies.assert_not_called()
+
+    def test_declined_setup_does_not_elevate(self):
+        with (
+            patch.object(app_launcher, "check_windows_network", return_value=3),
+            patch.object(app_launcher, "setup_windows_network") as setup,
+            patch("builtins.input", return_value="n"),
+        ):
+            self.assertEqual(app_launcher.ensure_windows_network(True), 3)
+        setup.assert_not_called()
+
+    def test_noninteractive_setup_does_not_prompt_or_elevate(self):
+        with (
+            patch.object(app_launcher, "check_windows_network", return_value=2),
+            patch.object(app_launcher, "setup_windows_network") as setup,
+            patch("builtins.input") as question,
+        ):
+            self.assertEqual(app_launcher.ensure_windows_network(False), 2)
+        setup.assert_not_called()
+        question.assert_not_called()
+
+    def test_failed_or_cancelled_uac_setup_stops_before_receiver(self):
+        with (
+            patch.object(sys, "platform", "win32"),
+            patch.object(sys.stdin, "isatty", return_value=True),
+            patch.object(app_launcher, "check_windows_network", return_value=3),
+            patch.object(app_launcher, "setup_windows_network", return_value=1),
+            patch("builtins.input", return_value="y"),
+            patch.object(app_launcher, "prepare_dependencies") as dependencies,
+            patch.object(server, "main") as receiver,
+        ):
+            self.assertEqual(windows_app.main(["server"]), 1)
+        dependencies.assert_not_called()
+        receiver.assert_not_called()
+
+    def test_reboot_required_is_reported_and_does_not_continue(self):
+        with (
+            patch.object(app_launcher, "check_windows_network", return_value=3) as check,
+            patch.object(app_launcher, "setup_windows_network", return_value=3010),
+            patch("builtins.input", return_value="yes"),
+        ):
+            self.assertEqual(app_launcher.ensure_windows_network(True), 1)
+        check.assert_called_once()
+
+    def test_missing_headset_can_quit_before_the_menu_or_setup_prompt(self):
+        with (
+            patch.object(sys, "platform", "win32"),
+            patch.object(sys.stdin, "isatty", return_value=True),
+            patch.object(app_launcher, "check_windows_network", return_value=1),
+            patch.object(app_launcher, "setup_windows_network") as setup,
+            patch.object(app_launcher, "choose_mode") as menu,
+            patch("builtins.input", return_value="q"),
+        ):
+            self.assertEqual(windows_app.main([]), 0)
+        setup.assert_not_called()
+        menu.assert_not_called()
+
+    def test_reconnect_checks_again_before_showing_the_menu(self):
+        with (
+            patch.object(sys, "platform", "win32"),
+            patch.object(sys.stdin, "isatty", return_value=True),
+            patch.object(app_launcher, "check_windows_network", side_effect=[1, 0]) as network,
+            patch("builtins.input", side_effect=["", "q"]),
+        ):
+            self.assertEqual(windows_app.main([]), 0)
+        self.assertEqual(network.call_count, 2)
+
+    def test_closing_video_returns_to_the_menu(self):
+        with (
+            patch.object(sys, "platform", "win32"),
+            patch.object(sys.stdin, "isatty", return_value=True),
+            patch.object(app_launcher, "check_windows_network", return_value=0),
+            patch.object(app_launcher, "prepare_dependencies", return_value=None),
+            patch.object(viewer, "main", return_value=0) as receiver,
+            patch("builtins.input", side_effect=["1", "q"]),
+        ):
+            self.assertEqual(windows_app.main([]), 0)
+        receiver.assert_called_once_with([])
+
+    def test_failed_video_can_retry_then_return_to_menu(self):
+        with (
+            patch.object(sys, "platform", "win32"),
+            patch.object(sys.stdin, "isatty", return_value=True),
+            patch.object(app_launcher, "check_windows_network", return_value=0) as network,
+            patch.object(app_launcher, "prepare_dependencies", return_value=None),
+            patch.object(viewer, "main", side_effect=[1, 0]) as receiver,
+            patch("builtins.input", side_effect=["1", "", "q"]),
+        ):
+            self.assertEqual(windows_app.main([]), 0)
+        self.assertEqual(receiver.call_count, 2)
+        self.assertEqual(network.call_count, 2)
+
+    def test_failed_video_can_go_back_and_choose_the_other_mode(self):
+        with (
+            patch.object(sys, "platform", "win32"),
+            patch.object(sys.stdin, "isatty", return_value=True),
+            patch.object(app_launcher, "check_windows_network", return_value=0),
+            patch.object(app_launcher, "prepare_dependencies", return_value=None),
+            patch.object(viewer, "main", return_value=1) as watch,
+            patch.object(server, "main", return_value=0) as share,
+            patch("builtins.input", side_effect=["1", "b", "2", "q"]),
+        ):
+            self.assertEqual(windows_app.main([]), 0)
+        watch.assert_called_once_with([])
+        share.assert_called_once_with([])
+
+    def test_mac_menu_waits_for_a_single_headset_without_opening_usb(self):
+        with (
+            patch.object(sys, "platform", "darwin"),
+            patch.object(sys.stdin, "isatty", return_value=True),
+            patch("apps.diagnostics.usb_device_count", side_effect=[0, 2, 1]) as usb,
+            patch("builtins.input", side_effect=["", "", "q"]),
+            patch.object(app_launcher, "prepare_dependencies") as dependencies,
+        ):
+            self.assertEqual(mac_app.main([]), 0)
+        self.assertEqual(usb.call_count, 3)
+        dependencies.assert_not_called()
+
+    def test_setup_help_is_available_without_starting_a_receiver(self):
+        output = io.StringIO()
+        with patch("builtins.input", side_effect=["h", "q"]), patch.object(sys, "stdout", output):
+            self.assertIsNone(app_launcher.choose_mode())
+        self.assertIn("Set up your goggles", output.getvalue())
+        self.assertIn("Share Liveview", output.getvalue())
 
     def test_both_mode_help_commands_need_no_hardware_or_dependencies(self):
         with (

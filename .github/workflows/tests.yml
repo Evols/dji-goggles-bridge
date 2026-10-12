@@ -24,6 +24,9 @@ jobs:
       - name: Test the read-only Windows network checker
         if: runner.os == 'Windows'
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tests/test_network_check.ps1
+      - name: Test Windows setup with mocked UAC and adapter changes
+        if: runner.os == 'Windows'
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tests/test_network_setup.ps1
       - run: python -m build
 
   build-artifacts:

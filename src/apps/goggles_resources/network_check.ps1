@@ -1,7 +1,22 @@
-# Read-only Windows startup check. Never elevates, installs drivers or changes
-# adapter settings. Match the observed Goggles 3 USB identity rather than just
-# "Remote NDIS": phones and other USB devices can use that description too.
+# Read-only startup inspection. Setup/elevation lives in network_setup.ps1.
+# Exit codes: 0 ready; 1 no usable unique headset; 2 IP/disabled adapter;
+# 3 missing/wrong RNDIS driver; 4 inspection error.
 $ErrorActionPreference = 'Stop'
+
+function Get-GogglesDevices {
+    Get-CimInstance Win32_PnPEntity | Where-Object {
+        $_.Present -and $_.PNPDeviceID -like 'USB\VID_2CA3&PID_0020&MI_00\*'
+    }
+}
+
+function Get-GogglesAdapters($Device) {
+    $networkDevices = @(Get-CimInstance Win32_NetworkAdapter | Where-Object {
+        $_.PNPDeviceID -eq $Device.PNPDeviceID
+    })
+    Get-NetAdapter -IncludeHidden | Where-Object {
+        $networkDevices.InterfaceIndex -contains $_.ifIndex
+    }
+}
 
 function Test-GogglesNetwork($Addresses, $Dhcp, $Gateways) {
     return (@($Addresses).Count -eq 1 -and
@@ -13,48 +28,52 @@ function Test-GogglesNetwork($Addresses, $Dhcp, $Gateways) {
 
 function Confirm-GogglesNetwork {
     try {
-        Write-Host 'Checking the goggles USB network adapter...'
-        $devices = @(Get-CimInstance Win32_NetworkAdapter | Where-Object {
-            $_.PNPDeviceID -like 'USB\VID_2CA3&PID_0020&MI_00\*'
-        })
-        $connected = @(foreach ($device in $devices) {
-            Get-NetAdapter -IncludeHidden | Where-Object {
-                $_.ifIndex -eq $device.InterfaceIndex -and $_.Status -eq 'Up'
-            }
-        })
-        if ($connected.Count -ne 1) {
-            Write-Host 'Windows does not report exactly one connected Goggles 3 USB network adapter.'
-            Write-Host 'Connect one headset with a USB DATA cable; power it on and enable OTG Wired Connection.'
-            Write-Host 'Open Device Manager and look for Remote NDIS under Network adapters.'
-            Write-Host 'A warning icon or Unknown device can mean the driver is missing or was replaced.'
-            Write-Host 'Windows supplies the RNDIS driver. Restore it using Device Manager if needed.'
-            Write-Host 'This checker does not install or replace drivers. Different USB identities are not automatically accepted.'
+        Write-Host 'Checking the goggles RNDIS driver and USB network adapter...'
+        $devices = @(Get-GogglesDevices)
+        if ($devices.Count -ne 1) {
+            if ($devices.Count -eq 0) { Write-Host '[WAIT] USB: no goggles RNDIS interface detected.' }
+            else { Write-Host '[WARN] USB: multiple goggles detected; connect only one.' }
+            Write-Host 'Connect exactly one Goggles 3 with a USB DATA cable and enable OTG Wired Connection.'
+            Write-Host 'No unique supported headset is present; setup will not change anything.'
             return 1
         }
-        $adapter = $connected[0]
+        $device = $devices[0]
+        Write-Host '[OK] USB: plugged in (Goggles 3 detected).'
+        if ($device.ConfigManagerErrorCode -ne 0 -or $device.Service -notmatch 'rndis') {
+            Write-Host 'The goggles are detected, but their Windows RNDIS driver is not ready.'
+            Write-Host 'Setup can enable the device or restore the built-in RNDIS driver.'
+            return 3
+        }
+        $adapters = @(Get-GogglesAdapters $device)
+        if ($adapters.Count -ne 1) {
+            Write-Host 'The detected goggles do not have exactly one RNDIS network adapter.'
+            return 3
+        }
+        $adapter = $adapters[0]
+        if ($adapter.Status -eq 'Disabled') {
+            Write-Host 'The goggles USB network adapter is disabled.'
+            return 2
+        }
+        if ($adapter.Status -ne 'Up') {
+            Write-Host 'The goggles USB network link is disconnected. Check power, the data cable and OTG.'
+            return 1
+        }
         $addresses = @(Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue)
         $dhcp = (Get-NetIPInterface -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4).Dhcp
         $gateways = @(Get-NetRoute -InterfaceIndex $adapter.ifIndex -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue)
         if (Test-GogglesNetwork $addresses $dhcp $gateways) {
             Write-Host ('Ready: ' + $adapter.Name + ' uses 192.168.60.1 / 255.255.255.0, no gateway.')
-                return 0
+            return 0
         }
         Write-Host ('Windows detects the goggles USB adapter: ' + $adapter.Name)
-        Write-Host 'Its network settings need one-time setup. This is a separate USB network link to the headset.'
-        Write-Host 'Set the PC end to 192.168.60.1 with subnet mask 255.255.255.0 and no gateway.'
-        Write-Host 'The headset uses 192.168.60.2. These are local USB addresses, not your Internet/Wi-Fi addresses.'
-        Write-Host 'Manual setup:'
-        Write-Host '  Win+R -> ncpa.cpl -> right-click the goggles adapter shown above -> Properties'
-        Write-Host '  -> Internet Protocol Version 4 (TCP/IPv4) -> Properties -> Use the following IP address.'
-        Write-Host '  IP: 192.168.60.1; mask: 255.255.255.0; gateway and DNS: leave blank.'
-        Write-Host 'Save, then run the launcher again. This checker changes nothing.'
-        return 1
+        Write-Host 'Its IPv4 settings need setup: 192.168.60.1 / 255.255.255.0, no gateway.'
+        Write-Host 'Manual setup: Win+R -> ncpa.cpl -> goggles adapter -> Properties -> IPv4.'
+        return 2
     } catch {
         Write-Host ('Network check failed: ' + $_.Exception.Message)
         Write-Host 'See README.md for manual adapter/driver checks. No settings were changed.'
-        return 1
+        return 4
     }
 }
 
-# Tests can dot-source these functions without running the real hardware check.
 if ($MyInvocation.InvocationName -ne '.') { exit (Confirm-GogglesNetwork) }

@@ -1,7 +1,9 @@
 """Check the applications use the real SDK, with a synthetic loopback headset."""
 
+import io
 import threading
 import unittest
+from contextlib import redirect_stdout
 from unittest.mock import patch
 
 import test_decoder
@@ -44,6 +46,7 @@ class ApplicationTests(unittest.TestCase):
         import cv2
 
         with Peer() as peer:
+            output = io.StringIO()
             stop, thread, errors = self.start_source(peer)
             args = [
                 "--local-ip",
@@ -58,17 +61,20 @@ class ApplicationTests(unittest.TestCase):
             # Only GUI calls are mocked; packets, receive worker, parser,
             # decoder and NumPy conversion all run normally.
             with (
+                redirect_stdout(output),
                 patch("apps.viewer.sys.platform", "win32"),
                 patch.object(cv2, "namedWindow"),
                 patch.object(cv2, "resizeWindow"),
                 patch.object(cv2, "imshow") as show,
-                patch.object(cv2, "waitKey", return_value=ord("q")),
+                patch.object(cv2, "waitKey", side_effect=lambda _: ord("q") if show.called else -1),
                 patch.object(cv2, "destroyAllWindows") as destroy,
             ):
                 self.assertEqual(viewer.main(args), 0)
                 image = show.call_args.args[1]
                 self.assertEqual(image.shape, (48, 64, 3))
                 destroy.assert_called_once()
+            self.assertIn("Live view: playing (64x48)", output.getvalue())
+            self.assertIn("Ready to watch!", output.getvalue())
             stop.set()
             thread.join(2)
             self.assertFalse(thread.is_alive())
@@ -98,6 +104,7 @@ class ApplicationTests(unittest.TestCase):
                     images.close()
 
         with Peer() as peer, socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as receiver:
+            output = io.StringIO()
             receiver.bind(("127.0.0.1", 0))
             receiver.settimeout(0.1)
             stop, thread, errors = self.start_source(peer)
@@ -113,8 +120,10 @@ class ApplicationTests(unittest.TestCase):
                 "--port",
                 str(receiver.getsockname()[1]),
             ]
-            with patch.object(server, "GogglesClient", FiniteClient):
+            with redirect_stdout(output), patch.object(server, "GogglesClient", FiniteClient):
                 self.assertEqual(server.main(args), 0)
+            self.assertIn("Live view: playing (64x48)", output.getvalue())
+            self.assertIn("Video is ready for your player", output.getvalue())
             stop.set()
             thread.join(2)
             self.assertEqual(errors, [])

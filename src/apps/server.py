@@ -17,11 +17,13 @@ from pathlib import Path
 if __package__ in (None, "") and not getattr(sys, "frozen", False):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from apps.console import note, save_error
+from apps.diagnostics import checked_frames
 from apps.viewer import connection_arguments, connection_config
 from dji_goggles_bridge import GogglesClient
 
 
-def write_mpegts(frames, destination, *, fps: int = 30) -> int:
+def write_mpegts(frames, destination, *, fps: int = 30, on_started=None) -> int:
     """Encode BGR NumPy frames into a standard MPEG-TS video stream.
 
     destination can be a UDP URL or a writable file-like object for tests.
@@ -46,6 +48,7 @@ def write_mpegts(frames, destination, *, fps: int = 30) -> int:
     time_base = Fraction(1, 90000)
     started = time.monotonic()
     previous_pts = -1
+    output_started = False
     with av.open(
         destination,
         mode="w",
@@ -75,6 +78,10 @@ def write_mpegts(frames, destination, *, fps: int = 30) -> int:
             previous_pts = frame.pts
             for packet in stream.encode(frame):
                 output.mux(packet)
+                if not output_started:
+                    output_started = True
+                    if on_started is not None:
+                        on_started()
             count += 1
         # Flush any delayed encoded packets before closing the transport.
         for packet in stream.encode(None):
@@ -101,22 +108,28 @@ def main(argv=None) -> int:
     # Seven 188-byte transport packets fit in one 1316-byte UDP datagram,
     # keeping the output below the usual Ethernet MTU.
     destination = f"udp://{args.host}:{args.port}?pkt_size=1316"
-    print(f"Sending H.264 / MPEG-TS to {args.host}:{args.port}", flush=True)
-    print(f"VLC: Media > Open Network Stream > udp://@{args.host}:{args.port}", flush=True)
-    print(f"OBS: Media Source > uncheck Local File > udp://{args.host}:{args.port}", flush=True)
-    print("OBS Input Format: mpegts. Keep this terminal open; Ctrl+C stops the server.", flush=True)
+
+    def show_player_instructions():
+        note("\nVideo is ready for your player.")
+        note(f"VLC: open a network stream with udp://@{args.host}:{args.port}")
+        note(f"OBS: add a Media Source, turn off Local File, and use udp://{args.host}:{args.port}")
+        note("In OBS, set Input Format to mpegts. Keep this app open while watching.\n")
+
     try:
         config = connection_config(args)
-        with GogglesClient(config) as goggles:
-            images = goggles.frames()
-            try:
-                write_mpegts(images, destination)
-            finally:
-                images.close()
+        with checked_frames(GogglesClient(config), config) as images:
+            count = write_mpegts(
+                images,
+                destination,
+                on_started=show_player_instructions,
+            )
+            if count == 0:
+                note("No video was received.")
     except KeyboardInterrupt:
         return 0
     except Exception as exc:
-        print(f"Frame server: {exc}", file=sys.stderr)
+        save_error(exc)
+        print("Couldn't share the video. Follow the connection help above.", file=sys.stderr)
         return 1
     return 0
 

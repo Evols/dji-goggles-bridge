@@ -71,6 +71,7 @@ class ClientTests(unittest.TestCase):
             peer.socket.sendto(resent, peer.client)
             chunks = client.h264()
             self.assertEqual(next(chunks), b"ABC")
+            self.assertGreaterEqual(client.stats["video_packets"], 3)
             chunks.close()
         self.assertFalse(client._thread.is_alive())
 

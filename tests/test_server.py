@@ -4,7 +4,7 @@ import io
 import itertools
 import socket
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from apps import server
 
@@ -90,3 +90,13 @@ class ServerTests(unittest.TestCase):
         output = io.BytesIO()
         self.assertEqual(server.write_mpegts([], output), 0)
         self.assertEqual(output.getvalue(), b"")
+
+    def test_output_confirmation_requires_an_encoded_packet(self):
+        started = Mock()
+        server.write_mpegts([], io.BytesIO(), on_started=started)
+        started.assert_not_called()
+        output = io.BytesIO()
+        server.write_mpegts(self.images(2), output, on_started=started)
+        started.assert_called_once()
+        with av.open(io.BytesIO(output.getvalue()), format="mpegts") as input:
+            self.assertEqual(len(list(input.decode(video=0))), 2)

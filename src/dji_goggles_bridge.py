@@ -522,6 +522,7 @@ class GogglesClient:
                 if packet.kind == 2:
                     try:
                         fragment = parse_video(packet)
+                        self._count("video_packets")
                         video.observe(packet.sequence, fragment.sender_start)
                         unit = reassembler.add(fragment, now)
                     except ProtocolError:
