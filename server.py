@@ -13,7 +13,8 @@ import sys
 import time
 from fractions import Fraction
 
-from dji_goggles_bridge import ConnectionConfig, GogglesClient
+from dji_goggles_bridge import GogglesClient
+from viewer import connection_arguments, connection_config
 
 
 def write_mpegts(frames, destination, *, fps: int = 30) -> int:
@@ -79,10 +80,7 @@ def write_mpegts(frames, destination, *, fps: int = 30) -> int:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Send Goggles video to VLC/OBS as UDP MPEG-TS")
-    parser.add_argument("--local-ip", default="192.168.60.1", help="RNDIS adapter IPv4 address")
-    parser.add_argument("--headset-ip", default="192.168.60.2")
-    parser.add_argument("--local-port", type=int, default=12346)
-    parser.add_argument("--headset-port", type=int, default=9003)
+    connection_arguments(parser)
     parser.add_argument("--host", default="127.0.0.1", help="Media player's IPv4 address")
     parser.add_argument("--port", type=int, default=5600, help="Media player's UDP receive port")
     args = parser.parse_args(argv)
@@ -101,12 +99,7 @@ def main(argv=None) -> int:
     print(f"OBS: Media Source > uncheck Local File > udp://{args.host}:{args.port}", flush=True)
     print("OBS Input Format: mpegts. Keep this terminal open; Ctrl+C stops the server.", flush=True)
     try:
-        config = ConnectionConfig(
-            local_ip=args.local_ip,
-            headset_ip=args.headset_ip,
-            local_port=args.local_port,
-            headset_port=args.headset_port,
-        )
+        config = connection_config(args)
         with GogglesClient(config) as goggles:
             images = goggles.frames()
             try:

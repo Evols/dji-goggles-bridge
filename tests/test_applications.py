@@ -59,6 +59,7 @@ class ApplicationTests(unittest.TestCase):
             # Only GUI calls are mocked; packets, receive worker, parser,
             # decoder and NumPy conversion all run normally.
             with (
+                patch("viewer.sys.platform", "win32"),
                 patch.object(cv2, "namedWindow"),
                 patch.object(cv2, "resizeWindow"),
                 patch.object(cv2, "imshow") as show,

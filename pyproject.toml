@@ -14,8 +14,9 @@ keywords = ["dji", "goggles", "h264", "video", "rndis"]
 dependencies = []
 
 [project.optional-dependencies]
+usb = ["pyusb>=1.3,<2"]
 decode = ["av>=14,<20", "numpy>=1.26,<3"]
-apps = ["av>=14,<20", "numpy>=1.26,<3", "opencv-python>=4.10,<6"]
+apps = ["av>=14,<20", "numpy>=1.26,<3", "opencv-python>=4.10,<6", "pyusb>=1.3,<2; sys_platform == 'darwin'"]
 dev = ["ruff>=0.9,<1", "build>=1,<2"]
 
 [project.scripts]
@@ -23,7 +24,7 @@ goggles-view = "viewer:main"
 goggles-serve = "server:main"
 
 [tool.setuptools]
-py-modules = ["dji_goggles_bridge", "viewer", "server"]
+py-modules = ["dji_goggles_bridge", "rndis", "viewer", "server"]
 
 [tool.ruff]
 line-length = 100

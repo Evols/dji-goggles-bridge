@@ -36,7 +36,7 @@ if not exist ".venv\Scripts\python.exe" (
 ".venv\Scripts\python.exe" -c "import av, numpy, cv2" >nul 2>&1
 if errorlevel 1 (
     echo Installing video dependencies. Internet is needed for this step...
-    ".venv\Scripts\python.exe" -m pip install -r requirements.txt
+    ".venv\Scripts\python.exe" -m pip install ".[apps]"
     if errorlevel 1 goto setup_failed
 )
 ".venv\Scripts\python.exe" viewer.py %*
