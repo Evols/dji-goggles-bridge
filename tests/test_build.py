@@ -1,5 +1,6 @@
 """macOS single-file packaging and archive contents without a Mac toolchain."""
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -39,7 +40,9 @@ class BuildTests(unittest.TestCase):
             package_command = next(command for command in commands if "PyInstaller" in command)
             self.assertIn("--onefile", package_command)
             binary = package_command[package_command.index("--add-binary") + 1]
-            self.assertTrue(binary.startswith(str(library)))
+            source, destination = binary.rsplit(os.pathsep, 1)
+            self.assertTrue(Path(source).samefile(library))
+            self.assertEqual(destination, ".")
             self.assertEqual(
                 [command for command in commands if command[0] == str(executable)],
                 [
