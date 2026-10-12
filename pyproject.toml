@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dji-goggles-bridge"
+version = "0.1.0"
+description = "A small, documented DJI Goggles 3 H.264 and NumPy frame SDK"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["dji", "goggles", "h264", "video", "rndis"]
+dependencies = []
+
+[project.optional-dependencies]
+decode = ["av>=14,<20", "numpy>=1.26,<3"]
+apps = ["av>=14,<20", "numpy>=1.26,<3", "opencv-python>=4.10,<6"]
+dev = ["ruff>=0.9,<1", "build>=1,<2"]
+
+[project.scripts]
+goggles-view = "viewer:main"
+goggles-serve = "server:main"
+
+[tool.setuptools]
+py-modules = ["dji_goggles_bridge", "viewer", "server"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+exclude = [".venv", ".local", "build", "dist"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
