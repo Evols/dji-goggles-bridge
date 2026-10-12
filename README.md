@@ -345,10 +345,13 @@ generated specs stay under `build/`. Internet may be needed for the first build.
 Use `--skip-install` to rebuild with dependencies already installed.
 Every build checks launcher help and both receiver help commands without hardware.
 
-The **build applications** GitHub Actions workflow runs manually, on `v*` tags,
-and on pull requests changing application/build code. It builds Windows x64,
-macOS Apple Silicon, and macOS Intel archives on native runners and uploads
-them as workflow artifacts. It does not publish a GitHub Release automatically.
+The **tests** GitHub Actions workflow runs on every push and pull request,
+including tag pushes. After the test matrix passes, it calls the reusable
+**build applications** workflow to build Windows x64, macOS Apple Silicon,
+and macOS Intel archives on native runners. Packaging or executable startup
+failures fail the CI run. The resulting archives are uploaded as downloadable
+workflow artifacts. You can also run **build applications** manually.
+It does not publish a GitHub Release automatically.
 Standard GitHub-hosted runners are free for public repositories.
 
 macOS builds use PyInstaller's free ad-hoc signing and are not notarized.

@@ -1,8 +1,13 @@
 name: tests
 on: [push, pull_request]
+
+permissions:
+  contents: read
+
 jobs:
   test:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python: ['3.10', '3.12', '3.14']
@@ -20,3 +25,8 @@ jobs:
         if: runner.os == 'Windows'
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tests/test_network_check.ps1
       - run: python -m build
+
+  build-artifacts:
+    name: Build application artifacts
+    needs: test
+    uses: ./.github/workflows/build.yml

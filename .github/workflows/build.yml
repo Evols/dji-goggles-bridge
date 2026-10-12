@@ -1,15 +1,8 @@
 name: build applications
 
 on:
+  workflow_call:
   workflow_dispatch:
-  push:
-    tags: ['v*']
-  pull_request:
-    paths:
-      - 'src/**'
-      - 'scripts/**'
-      - 'pyproject.toml'
-      - '.github/workflows/build.yml'
 
 permissions:
   contents: read
