@@ -6,7 +6,9 @@ $script:NetworkSetupPath = $PSCommandPath
 
 function Get-UniqueGogglesDevice {
     $devices = @(Get-GogglesDevices)
-    if ($devices.Count -ne 1) { throw 'Connect exactly one supported headset before setup.' }
+    if ($devices.Count -ne 1 -or @(Get-GogglesV2Devices).Count -ne 0) {
+        throw 'Connect exactly one Goggles 3 before RNDIS setup. V2 uses bulk USB.'
+    }
     return $devices[0]
 }
 

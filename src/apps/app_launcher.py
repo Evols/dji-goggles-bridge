@@ -11,7 +11,7 @@ from pathlib import Path
 
 from apps.console import save_details, save_error
 
-SETUP = """Set up your goggles:
+SETUP = """Set up your goggles (DJI Goggles 3):
   1. Power on the goggles and connect a USB-C DATA cable.
   2. Settings > About > OTG Wired Connection to Computer: ON.
      The headset should show OTG Wired Connection - Connected.
@@ -21,6 +21,16 @@ SETUP = """Set up your goggles:
   4. Link the aircraft or air unit and confirm live camera video in the goggles.
      Without an aircraft: Settings > Camera > Advanced Camera Settings
      > Camera View Recording: ON, to stream the goggles' screen instead.
+
+DJI FPV Goggles V2 (Air Unit / Vista / O3):
+  Connect a USB DATA cable and link the air unit.
+  Select the goggles mode matching your air unit and confirm live camera video.
+  On Windows, first download Zadig from https://zadig.akeo.ie/ and run it.
+  Then enable Options > List All Devices, select Vision / Bulk Interface
+  (Interface 3 / MI_03, USB 2ca3:001f), and install WinUSB on that interface.
+  Select only that interface. V2 does not need the Goggles 3 OTG/Wi-Fi settings.
+  The menu detects V2; for direct commands use viewer/server --model v2.
+  DJI FPV drone / Avata remain unverified. AV-IN and DJI Goggles 2 are not supported.
 """
 
 
@@ -88,19 +98,24 @@ def ensure_windows_network(can_prompt: bool, *, retry_missing=False) -> int | No
     return check_windows_network()
 
 
-def ensure_mac_connection() -> int | None:
+def ensure_mac_connection(options=None) -> int | None:
     from apps.diagnostics import usb_device_count
 
     while True:
         try:
-            count = usb_device_count("darwin")
+            count = usb_device_count("darwin", model="all")
+            if count == 1 and options is not None and _model_option(options) is None:
+                if usb_device_count("darwin", model="v2") == 1:
+                    options.extend(["--model", "v2"])
         except (OSError, ValueError, subprocess.SubprocessError):
             print("Couldn't check USB. We'll try the connection when you start video.")
             return 0
         if count == 1 or count is None:
             return 0
         print("\nConnect and power on one pair of goggles using a USB data cable.")
-        print("In the goggles, turn on OTG Wired Connection.")
+        print(
+            "Goggles 3: turn on OTG Wired Connection. V2: select the mode matching your air unit."
+        )
         if input("Press Enter to check again, or Q to quit: ").strip().lower() == "q":
             return None
 
@@ -112,8 +127,9 @@ def prepare_dependencies(mode: str, platform: str, options: list[str]) -> int | 
     required = ["av", "numpy"]
     if mode == "viewer":
         required.append("cv2")
-    if platform == "darwin":
-        required.append("usb")
+    required.append("usb")
+    if platform == "win32":
+        required.append("libusb_package")
     if all(importlib.util.find_spec(name) is not None for name in required):
         return None
 
@@ -166,6 +182,12 @@ def after_attempt() -> str:
         print("Press Enter, B, or Q.")
 
 
+def _model_option(options):
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--model", choices=("goggles3", "v2"))
+    return parser.parse_known_args(options)[0].model
+
+
 def main(platform: str, argv=None) -> int:
     parser = argparse.ArgumentParser(
         description="DJI Goggles Bridge: show video or serve it to VLC/OBS",
@@ -183,8 +205,12 @@ def main(platform: str, argv=None) -> int:
     try:
         # Static help stays hardware-independent for users and packaging checks.
         help_requested = "--help" in args.options or "-h" in args.options
-        if platform == "win32" and not help_requested:
+        requested_model = _model_option(args.options)
+        if platform == "win32" and not help_requested and requested_model != "v2":
             result = ensure_windows_network(can_prompt, retry_missing=interactive)
+            if result == 5 and requested_model is None:
+                args.options.extend(["--model", "v2"])
+                result = 0
             if result is None:
                 return 0
             if result:
@@ -193,7 +219,7 @@ def main(platform: str, argv=None) -> int:
                     input("Press Enter to close...")
                 return result
         elif platform == "darwin" and interactive:
-            if ensure_mac_connection() is None:
+            if ensure_mac_connection(args.options) is None:
                 return 0
         if args.mode is None and not interactive:
             parser.error("Specify viewer or server when running without an interactive terminal")
@@ -241,8 +267,11 @@ def main(platform: str, argv=None) -> int:
                 mode = None
             else:
                 print("\nTrying again...", flush=True)
-                if platform == "win32":
+                if platform == "win32" and _model_option(args.options) != "v2":
                     result = ensure_windows_network(can_prompt, retry_missing=True)
+                    if result == 5 and _model_option(args.options) is None:
+                        args.options.extend(["--model", "v2"])
+                        result = 0
                     if result is None:
                         return 0
                     if result:

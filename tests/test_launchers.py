@@ -11,6 +11,49 @@ from apps import app_launcher, mac_app, server, viewer, windows_app
 
 
 class LauncherTests(unittest.TestCase):
+    def test_windows_detected_v2_skips_network_setup_and_passes_model_to_receiver(self):
+        with (
+            patch.object(sys, "platform", "win32"),
+            patch.object(app_launcher, "check_windows_network", return_value=5),
+            patch.object(app_launcher, "setup_windows_network") as setup,
+            patch.object(app_launcher, "prepare_dependencies", return_value=None),
+            patch.object(server, "main", return_value=0) as receiver,
+        ):
+            self.assertEqual(windows_app.main(["server", "--port", "5601"]), 0)
+        setup.assert_not_called()
+        receiver.assert_called_once_with(["--port", "5601", "--model", "v2"])
+
+    def test_explicit_v2_never_runs_windows_rndis_preflight(self):
+        for options in (["--model", "v2"], ["--model=v2", "--transport", "usb"]):
+            with (
+                patch.object(sys, "platform", "win32"),
+                patch.object(app_launcher, "check_windows_network") as network,
+                patch.object(app_launcher, "prepare_dependencies", return_value=None),
+                patch.object(viewer, "main", return_value=0) as receiver,
+            ):
+                self.assertEqual(windows_app.main(["viewer", *options]), 0)
+            network.assert_not_called()
+            receiver.assert_called_once_with(options)
+
+    def test_mac_menu_detects_v2_and_preserves_explicit_model(self):
+        options = ["--port", "5601"]
+        with patch("apps.diagnostics.usb_device_count", side_effect=[1, 1]):
+            self.assertEqual(app_launcher.ensure_mac_connection(options), 0)
+        self.assertEqual(options, ["--port", "5601", "--model", "v2"])
+        options = ["--model", "goggles3"]
+        with patch("apps.diagnostics.usb_device_count", return_value=1) as count:
+            self.assertEqual(app_launcher.ensure_mac_connection(options), 0)
+        count.assert_called_once_with("darwin", model="all")
+        self.assertEqual(options, ["--model", "goggles3"])
+
+    def test_mac_model_inventory_failure_still_allows_connection(self):
+        options = []
+        with patch(
+            "apps.diagnostics.usb_device_count", side_effect=[1, OSError("registry unavailable")]
+        ):
+            self.assertEqual(app_launcher.ensure_mac_connection(options), 0)
+        self.assertEqual(options, [])
+
     def test_windows_network_failure_stops_before_dependency_setup_and_receiver(self):
         with (
             patch.object(sys, "platform", "win32"),
@@ -199,12 +242,12 @@ class LauncherTests(unittest.TestCase):
         with (
             patch.object(sys, "platform", "darwin"),
             patch.object(sys.stdin, "isatty", return_value=True),
-            patch("apps.diagnostics.usb_device_count", side_effect=[0, 2, 1]) as usb,
+            patch("apps.diagnostics.usb_device_count", side_effect=[0, 2, 1, 0]) as usb,
             patch("builtins.input", side_effect=["", "", "q"]),
             patch.object(app_launcher, "prepare_dependencies") as dependencies,
         ):
             self.assertEqual(mac_app.main([]), 0)
-        self.assertEqual(usb.call_count, 3)
+        self.assertEqual(usb.call_count, 4)
         dependencies.assert_not_called()
 
     def test_setup_help_is_available_without_starting_a_receiver(self):

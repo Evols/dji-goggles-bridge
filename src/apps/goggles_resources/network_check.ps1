@@ -1,11 +1,17 @@
 # Read-only startup inspection. Setup/elevation lives in network_setup.ps1.
 # Exit codes: 0 ready; 1 no usable unique headset; 2 IP/disabled adapter;
-# 3 missing/wrong RNDIS driver; 4 inspection error.
+# 3 missing/wrong RNDIS driver; 4 inspection error; 5 V2 bulk USB (no network setup).
 $ErrorActionPreference = 'Stop'
 
 function Get-GogglesDevices {
     Get-CimInstance Win32_PnPEntity | Where-Object {
         $_.Present -and $_.PNPDeviceID -like 'USB\VID_2CA3&PID_0020&MI_00\*'
+    }
+}
+
+function Get-GogglesV2Devices {
+    Get-CimInstance Win32_PnPEntity | Where-Object {
+        $_.Present -and $_.PNPDeviceID -like 'USB\VID_2CA3&PID_001F&MI_03\*'
     }
 }
 
@@ -30,12 +36,21 @@ function Confirm-GogglesNetwork {
     try {
         Write-Host 'Checking the goggles RNDIS driver and USB network adapter...'
         $devices = @(Get-GogglesDevices)
-        if ($devices.Count -ne 1) {
-            if ($devices.Count -eq 0) { Write-Host '[WAIT] USB: no goggles RNDIS interface detected.' }
+        $v2Devices = @(Get-GogglesV2Devices)
+        if (($devices.Count + $v2Devices.Count) -ne 1) {
+            if (($devices.Count + $v2Devices.Count) -eq 0) { Write-Host '[WAIT] USB: no supported goggles interface detected.' }
             else { Write-Host '[WARN] USB: multiple goggles detected; connect only one.' }
-            Write-Host 'Connect exactly one Goggles 3 with a USB DATA cable and enable OTG Wired Connection.'
+            Write-Host 'Connect exactly one Goggles 3 or FPV Goggles V2 with a USB DATA cable.'
+            Write-Host 'Goggles 3: enable OTG Wired Connection. V2: select the mode matching your air unit.'
             Write-Host 'No unique supported headset is present; setup will not change anything.'
             return 1
+        }
+        if ($v2Devices.Count -eq 1) {
+            Write-Host '[OK] USB: plugged in (Goggles V2 bulk interface detected).'
+            Write-Host 'V2 uses bulk USB. Select the mode matching your air unit and confirm live camera video.'
+            Write-Host 'On Windows, first download Zadig from https://zadig.akeo.ie/ and run it.'
+            Write-Host 'Then enable Options > List All Devices and install WinUSB on Vision / Bulk Interface (Interface 3 / MI_03, USB 2ca3:001f). No network setup is needed.'
+            return 5
         }
         $device = $devices[0]
         Write-Host '[OK] USB: plugged in (Goggles 3 detected).'

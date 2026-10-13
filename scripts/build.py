@@ -36,9 +36,9 @@ def main(argv=None) -> int:
         if not python.is_file():
             run([sys.executable, "-m", "venv", str(ROOT / ".venv")])
         run([str(python), "-m", "pip", "install", ".[apps,exe]"])
-    modules = "import PyInstaller, av, numpy, cv2"
-    if target == "macos":
-        modules += ", usb"
+    modules = "import PyInstaller, av, numpy, cv2, usb"
+    if target == "windows":
+        modules += ", libusb_package"
     run([str(python), "-c", modules])
 
     name = f"dji-goggles-bridge-{target}"
@@ -68,6 +68,8 @@ def main(argv=None) -> int:
         "--collect-data",
         "apps.goggles_resources",
     ]
+    if target == "windows":
+        command += ["--collect-all", "libusb_package"]
     if target == "macos":
         # PyUSB loads this library dynamically; bundle it for Macs without Homebrew.
         library = ctypes.util.find_library("usb-1.0")

@@ -13,6 +13,7 @@ from unittest.mock import Mock, patch
 from helpers import video, wire
 
 from dji_goggles_bridge import ConnectionConfig, GogglesClient
+from goggles_3 import Goggles3Session
 from rndis import (
     IPv4UDP,
     RndisError,
@@ -537,9 +538,9 @@ class USBTests(unittest.TestCase):
             peer = USBPeer()
             adapter = self.open_adapter(peer)
             with (
-                patch("dji_goggles_bridge.sys.platform", platform),
+                patch("goggles_3.sys.platform", platform),
                 patch.object(RndisUSB, "open", return_value=adapter) as usb_open,
-                patch.object(GogglesClient, "_open_udp", side_effect=RuntimeError("udp")),
+                patch.object(Goggles3Session, "_open_udp", side_effect=RuntimeError("udp")),
             ):
                 if platform == "darwin":
                     with GogglesClient():
@@ -552,8 +553,8 @@ class USBTests(unittest.TestCase):
 
     def test_explicit_udp_overrides_mac_default(self):
         with (
-            patch("dji_goggles_bridge.sys.platform", "darwin"),
-            patch.object(GogglesClient, "_open_udp", side_effect=RuntimeError("udp")),
+            patch("goggles_3.sys.platform", "darwin"),
+            patch.object(Goggles3Session, "_open_udp", side_effect=RuntimeError("udp")),
         ):
             with self.assertRaisesRegex(RuntimeError, "udp"):
                 GogglesClient(ConnectionConfig(transport="udp")).open()

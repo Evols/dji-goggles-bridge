@@ -12,6 +12,14 @@ from dji_goggles_bridge import ConnectionConfig
 
 
 class WindowTests(unittest.TestCase):
+    def test_v2_model_reaches_viewer_configuration(self):
+        with (
+            patch.object(viewer.sys, "platform", "darwin"),
+            patch.object(viewer, "_view_mac", return_value=0) as mac,
+        ):
+            self.assertEqual(viewer.main(["--model", "v2"]), 0)
+        self.assertEqual(mac.call_args.args[0], ConnectionConfig(model="v2"))
+
     def test_q_works_while_no_frames_arrive(self):
         closed, ready = threading.Event(), threading.Event()
         errors = queue.Queue()

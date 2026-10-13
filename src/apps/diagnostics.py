@@ -12,8 +12,9 @@ from contextlib import contextmanager
 from apps.console import StatusPanel, active_panel, save_details, save_error
 
 
-def usb_device_count(platform: str | None = None) -> int | None:
-    """Count present Goggles 3, without claiming, resetting or configuring USB."""
+def usb_device_count(platform: str | None = None, *, model="goggles3") -> int | None:
+    """Count a model without claiming, resetting or configuring USB."""
+    products = {"goggles3": (0x0020,), "v2": (0x001F,), "all": (0x0020, 0x001F)}[model]
     platform = platform or sys.platform
     if platform == "win32":
         command = [
@@ -22,8 +23,11 @@ def usb_device_count(platform: str | None = None) -> int | None:
             "-Command",
             "$ErrorActionPreference = 'Stop'; "
             "@(Get-CimInstance Win32_PnPEntity | Where-Object { "
-            "$_.Present -and $_.PNPDeviceID -like 'USB\\VID_2CA3&PID_0020\\*' "
-            "}).Count",
+            "$_.Present -and ("
+            + " -or ".join(
+                f"$_.PNPDeviceID -like 'USB\\VID_2CA3&PID_{product:04X}\\*'" for product in products
+            )
+            + ") }).Count",
         ]
         return int(subprocess.check_output(command, timeout=5).strip())
     if platform == "darwin":
@@ -35,7 +39,7 @@ def usb_device_count(platform: str | None = None) -> int | None:
             if not isinstance(nodes, list) or any(not isinstance(node, dict) for node in nodes):
                 raise ValueError("Unexpected USB registry inventory")
             return sum(
-                int(node.get("idVendor") == 0x2CA3 and node.get("idProduct") == 0x0020)
+                int(node.get("idVendor") == 0x2CA3 and node.get("idProduct") in products)
                 + count(node.get("IORegistryEntryChildren", []))
                 for node in nodes
             )
@@ -64,7 +68,8 @@ class StreamChecks:
         self.stalled = False
         self.failure = None
         self.usb_present = False
-        self.network_only = config.headset_ip.startswith("127.")
+        self.v2 = config.model == "v2"
+        self.network_only = not self.v2 and config.headset_ip.startswith("127.")
         self.panel = panel or StatusPanel()
         self.notices = notices if notices is not None else set()
         self.picture_size = ""
@@ -91,7 +96,7 @@ class StreamChecks:
             return
         self.usb_present = False
         try:
-            count = usb_device_count()
+            count = usb_device_count(model=self.config.model)
         except (OSError, ValueError, subprocess.SubprocessError):
             self.panel.status("USB", "couldn't check; trying to connect anyway")
             return
@@ -144,6 +149,12 @@ class StreamChecks:
             self.panel.status("Live view", "waiting for video")
             if "sharing" not in self.notices:
                 self.notices.add("sharing")
+                if self.v2:
+                    self.say("Your Goggles V2 are plugged in, but aren't sending video.")
+                    self.say(
+                        "Next: select the goggles mode matching your air unit and confirm live video."
+                    )
+                    return True
                 self.say(
                     "Your goggles are plugged in, but aren't sending video. Sharing may be off."
                 )
@@ -158,7 +169,7 @@ class StreamChecks:
             if stats.get("received_packets", 0):
                 self.pass_stage("Headset", "goggles are responding")
             missing_live_view = self.check_live_view(stats)
-            if stats.get("h264_units", 0):
+            if stats.get("h264_units", 0) or (self.v2 and stats.get("h264_chunks", 0)):
                 self.pass_stage("Video", "video received")
             age = now - (self.last_frame if self.last_frame is not None else self.started)
             if age >= 3:
@@ -182,6 +193,10 @@ class StreamChecks:
                         if stage == "Video" and stats.get("video_packets", 0):
                             hints[stage] = (
                                 "Video is arriving, but the picture is incomplete. Check the USB cable."
+                            )
+                        if self.v2 and stage in ("Headset", "Video"):
+                            hints[stage] = (
+                                "Select the goggles mode matching your air unit and confirm live video."
                             )
                         self.say("Next: " + hints[stage])
             elapsed = now - self.last_report
@@ -224,6 +239,28 @@ class StreamChecks:
         self.panel.status("Live view", "not playing")
         if isinstance(exc, BufferError):
             self.say("Next step: close other heavy apps so the video can keep up.")
+        elif self.v2:
+            from goggles_v2 import V2USBError
+
+            if isinstance(exc, V2USBError):
+                self.say(str(exc))
+            elif isinstance(exc, TimeoutError) and "Connection" in self.passed:
+                self.say(
+                    "The V2 USB interface opened, but video did not become ready. "
+                    "Confirm a live air-unit picture in the goggles, use the matching goggles mode "
+                    "and check the USB data cable."
+                )
+            else:
+                self.say(
+                    "Next step: select the goggles mode matching your air unit and confirm live video."
+                )
+            if "Connection" not in self.passed and not isinstance(exc, V2USBError):
+                self.say(
+                    "Close other goggles apps. On Windows, first download Zadig from "
+                    "https://zadig.akeo.ie/ and run it. Then enable Options > List All Devices "
+                    "and install WinUSB on Vision / Bulk Interface (Interface 3 / MI_03, "
+                    "USB 2ca3:001f). On Linux, check USB permissions."
+                )
         elif missing_live_view:
             if "camera_help" not in self.notices:
                 self.notices.add("camera_help")

@@ -128,8 +128,8 @@ class ClientTests(unittest.TestCase):
         source = Path(__file__).resolve().parents[1] / "src"
         code = (
             f"import sys; sys.path.insert(0, {str(source)!r}); "
-            "import dji_goggles_bridge; "
-            "assert not any(m in sys.modules for m in ['av','cv2','numpy'])"
+            "import dji_goggles_bridge, goggles_3, goggles_v2, decoder, rndis; "
+            "assert not any(m in sys.modules for m in ['av','cv2','numpy','usb'])"
         )
         result = subprocess.run([sys.executable, "-S", "-c", code], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)

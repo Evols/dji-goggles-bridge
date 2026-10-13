@@ -106,6 +106,12 @@ Reset-Setup
 $script:PnpDevices += [pscustomobject]@{ Present = $true; PNPDeviceID = 'USB\VID_2CA3&PID_0020&MI_00\SECOND' }
 Assert-Refused 'Multiple headsets'
 Reset-Setup
+$script:PnpDevices[0].PNPDeviceID = 'USB\VID_2CA3&PID_001F&MI_03\V2'
+Assert-Refused 'V2 never receives RNDIS driver or IP changes'
+Reset-Setup
+$script:PnpDevices += [pscustomobject]@{ Present = $true; PNPDeviceID = 'USB\VID_2CA3&PID_001F&MI_03\V2' }
+Assert-Refused 'Mixed V2 and Goggles 3 rejected before setup writes'
+Reset-Setup
 $script:PnpDevices[0].PNPDeviceID = 'USB\VID_1234&PID_5678\PHONE'
 Assert-Refused 'Unrelated phone'
 Reset-Setup

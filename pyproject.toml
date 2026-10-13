@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "dji-goggles-bridge"
 version = "0.1.0"
-description = "A small, documented DJI Goggles 3 H.264 and NumPy frame SDK"
+description = "A documented DJI Goggles 3 and FPV Goggles V2 H.264 and NumPy frame SDK"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -14,9 +14,9 @@ keywords = ["dji", "goggles", "h264", "video", "rndis"]
 dependencies = []
 
 [project.optional-dependencies]
-usb = ["pyusb>=1.3,<2"]
+usb = ["pyusb>=1.3,<2", "libusb-package>=1.0,<2; sys_platform == 'win32'"]
 decode = ["av>=14,<20", "numpy>=1.26,<3"]
-apps = ["av>=14,<20", "numpy>=1.26,<3", "opencv-python>=4.10,<6", "pyusb>=1.3,<2; sys_platform == 'darwin'"]
+apps = ["av>=14,<20", "numpy>=1.26,<3", "opencv-python>=4.10,<6", "pyusb>=1.3,<2", "libusb-package>=1.0,<2; sys_platform == 'win32'"]
 dev = ["ruff>=0.9,<1", "build>=1,<2"]
 exe = ["pyinstaller>=6,<7"]
 
@@ -28,7 +28,7 @@ goggles-mac = "apps.mac_app:main"
 
 [tool.setuptools]
 package-dir = {"" = "src", "scripts" = "scripts"}
-py-modules = ["dji_goggles_bridge", "rndis"]
+py-modules = ["dji_goggles_bridge", "goggles_3", "goggles_v2", "decoder", "rndis", "usb_backend"]
 packages = ["apps", "apps.goggles_resources"]
 
 [tool.setuptools.package-data]

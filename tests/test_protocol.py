@@ -3,7 +3,7 @@ import unittest
 
 from helpers import video, wire
 
-from dji_goggles_bridge import (
+from goggles_3 import (
     ProtocolError,
     Reassembler,
     ReceiveWindow,

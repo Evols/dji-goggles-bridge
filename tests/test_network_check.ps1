@@ -16,6 +16,16 @@ function Assert-Result([string]$Name, [int]$Expected) {
 Reset-Fixture
 Assert-Result 'Already configured' 0
 Reset-Fixture
+$script:PnpDevices[0].PNPDeviceID = 'USB\VID_2CA3&PID_001F&MI_03\V2'
+$script:PnpDevices[0].Service = 'WinUSB'
+Assert-Result 'V2 bulk interface bypasses RNDIS setup' 5
+Reset-Fixture
+$script:PnpDevices += [pscustomobject]@{ PNPDeviceID = 'USB\VID_2CA3&PID_001F&MI_03\V2'; Present = $true }
+Assert-Result 'Mixed V2 and Goggles 3 is ambiguous' 1
+Reset-Fixture
+$script:PnpDevices[0].PNPDeviceID = 'USB\VID_2CA3&PID_001F&MI_00\V2'
+Assert-Result 'V2 RNDIS interface never enters Goggles 3 setup' 1
+Reset-Fixture
 $script:Addresses[0].IPAddress = '169.254.1.2'
 Assert-Result 'Automatic fallback IP offers setup' 2
 Reset-Fixture

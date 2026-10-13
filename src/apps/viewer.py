@@ -23,15 +23,22 @@ def connection_config(args) -> ConnectionConfig:
         local_port=args.local_port,
         headset_port=args.headset_port,
         transport=args.transport,
+        model=args.model,
     )
 
 
 def connection_arguments(parser) -> None:
     parser.add_argument(
+        "--model",
+        choices=("goggles3", "v2"),
+        default="goggles3",
+        help="Headset model: goggles3 (default) or DJI FPV Goggles V2 (Air Unit / Vista / O3)",
+    )
+    parser.add_argument(
         "--transport",
         choices=("auto", "udp", "usb"),
         default="auto",
-        help="auto: userspace USB on macOS, network UDP on Windows/Linux",
+        help="Goggles 3 auto: USB on macOS, UDP elsewhere; V2: bulk USB on all platforms",
     )
     parser.add_argument(
         "--local-ip", default="192.168.60.1", help="Host IPv4 address on the goggles USB link"
@@ -242,7 +249,7 @@ def _view_desktop(config, title, cv2):
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
-        description="Show DJI Goggles 3 video; Q/Esc closes the window"
+        description="Show DJI Goggles 3 / FPV Goggles V2 video; Q/Esc closes the window"
     )
     connection_arguments(parser)
     args = parser.parse_args(argv)

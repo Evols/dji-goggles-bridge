@@ -1,4 +1,7 @@
-# DJI Goggles 3 UDP video protocol
+# DJI Goggles video protocols
+
+The sections through ACKs describe **Goggles 3**; the separate **FPV Goggles V2**
+bulk protocol is documented at the end.
 
 This document is intended for independent implementations. Integers are little
 endian. Offsets refer to the UDP payload, not Ethernet/IP/UDP headers. This
@@ -226,3 +229,45 @@ Parsing and decoding are separate operations. PyAV's
 access units; decode() turns parsed packets into pictures. Skip damaged initial
 packets, then let subsequent recovery data restore the picture. SHOW_ALL can
 expose briefly corrupted frames; it does not repair missing references itself.
+
+## DJI FPV Goggles V2 bulk USB
+
+The V2 receiver follows [voc-poc's USB implementation](https://github.com/fpv-wtf/voc-poc/blob/master/index.js)
+and the endpoint constants in [fpvout-c](https://github.com/fpvout/fpvout-c/blob/master/main.c).
+The documented legacy pairing is an original Air Unit or Caddx Vista. This same
+bulk receiver also produced live video with V2/O3 on Windows in local testing.
+It is distinct from Goggles 2 and Goggles 3.
+
+| Field | Value |
+| --- | --- |
+| USB vendor/product | `2ca3:001f` |
+| Interface / alternate setting | `3 / 0` |
+| Bulk OUT / IN | `03 / 84` |
+| Stream-start bytes, sent once to OUT | `52 4d 56 54` (`RMVT`) |
+
+Claim only interface 3 in the active configuration. Do not reset the composite
+device or change its configuration. Windows requires WinUSB on this interface;
+Linux may require a USB permission rule. Detach a kernel driver only from
+interface 3 if necessary, and restore it when closing.
+
+Read IN as an H.264 byte stream. Read boundaries can split NAL units; pass the
+bytes unchanged to the incremental decoder. There are no Goggles 3 UDP
+handshakes, receive windows, ACKs, IP addresses, or ports on this path.
+As in fpvout-c, a timeout of the initial `RMVT` write is nonfatal: start reading
+and let the bounded video wait determine whether a stream exists. Other write
+errors and short writes still fail. Successfully claiming the interface does
+not establish compatibility with the connected air unit.
+
+`goggles_v2.py` validates the interface and bulk endpoints before claiming them.
+The SDK bounds initial-video and idle waits, propagates USB disconnections,
+and reports queue overflow. Reads request up to 65536 bytes with a 50 ms timeout;
+PyUSB returns transferred bytes even for a partial read at timeout. This reduces
+the number of queued chunks during decoder startup compared with 1024-byte reads.
+Closing releases USB. Tests cover independent USB fixtures and real encoded
+H.264 split across reads.
+
+On October 13, 2026, a connected Windows V2/O3 headset using WinUSB on interface 3
+timed out on the initial `RMVT` write, then delivered H.264 and decoded a 1440×808
+picture after the receiver continued reading. The user confirmed working viewer
+playback. V2 testing on macOS/Linux and with other pairings remains outstanding;
+DJI FPV drone / Avata are unverified, and AV-IN is not supported by this receiver.

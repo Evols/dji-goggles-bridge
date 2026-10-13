@@ -16,6 +16,22 @@ from dji_goggles_bridge import ConnectionConfig, GogglesClient
 
 
 class InventoryTests(unittest.TestCase):
+    def test_v2_inventory_filters_by_model_and_all_counts_both_models(self):
+        tree = [
+            {"idVendor": 0x2CA3, "idProduct": 0x001F},
+            {"idVendor": 0x2CA3, "idProduct": 0x0020},
+            {"idVendor": 0x1234, "idProduct": 0x001F},
+        ]
+        with patch.object(
+            diagnostics.subprocess, "check_output", return_value=plistlib.dumps(tree)
+        ):
+            self.assertEqual(diagnostics.usb_device_count("darwin", model="v2"), 1)
+            self.assertEqual(diagnostics.usb_device_count("darwin", model="all"), 2)
+        with patch.object(diagnostics.subprocess, "check_output", return_value=b"1") as run:
+            self.assertEqual(diagnostics.usb_device_count("win32", model="v2"), 1)
+        self.assertIn("PID_001F", run.call_args.args[0][-1])
+        self.assertNotIn("PID_0020", run.call_args.args[0][-1])
+
     def test_windows_counts_only_present_supported_composite_devices(self):
         with patch.object(diagnostics.subprocess, "check_output", return_value=b"1\r\n") as run:
             self.assertEqual(diagnostics.usb_device_count("win32"), 1)
@@ -69,6 +85,53 @@ class InventoryTests(unittest.TestCase):
 
 
 class ProgressTests(unittest.TestCase):
+    def test_v2_video_timeout_after_open_explains_pairing_without_driver_advice(self):
+        checks = diagnostics.StreamChecks(ConnectionConfig(model="v2"), clock=lambda: self.now)
+        checks.passed.add("Connection")
+        with patch.object(diagnostics, "usb_device_count", return_value=1):
+            checks.failed(TimeoutError("No V2 video"))
+        text = self.output.getvalue()
+        self.assertIn("matching goggles mode", text)
+        self.assertNotIn("Zadig", text)
+        self.assertNotIn("WinUSB", text)
+
+    def test_v2_driver_failure_displays_the_specific_fix_in_the_console(self):
+        from goggles_v2 import V2USBError
+
+        checks = diagnostics.StreamChecks(ConnectionConfig(model="v2"), clock=lambda: self.now)
+        message = "Vision (Interface 3) needs WinUSB; its current driver is unsupported."
+        with patch.object(diagnostics, "usb_device_count", return_value=1):
+            checks.failed(V2USBError(message))
+        self.assertIn(message, self.output.getvalue())
+        self.assertNotIn("confirm live air-unit video", self.output.getvalue())
+        self.assertNotIn("Traceback", self.output.getvalue())
+
+    def test_v2_missing_video_and_open_failure_offer_model_specific_help(self):
+        checks = diagnostics.StreamChecks(ConnectionConfig(model="v2"), clock=lambda: self.now)
+        checks.usb_present = True
+        checks.client = self.client
+        self.now = 3
+        checks.check_live_view({})
+        with patch.object(diagnostics, "usb_device_count", return_value=1):
+            checks.failed(RuntimeError("Cannot claim"))
+        text = self.output.getvalue()
+        self.assertIn("mode matching your air unit", text)
+        self.assertIn("WinUSB", text)
+        self.assertNotIn("Share Liveview", text)
+        self.assertNotIn("OTG", text)
+        self.assertNotIn("Camera View Recording", text)
+
+    def test_v2_raw_chunks_start_video_checkpoint_and_decoder_stall_timer(self):
+        checks = diagnostics.StreamChecks(ConnectionConfig(model="v2"), clock=lambda: self.now)
+        checks.client = self.client
+        self.client.stats = {"received_packets": 1, "video_packets": 1, "h264_chunks": 1}
+        self.now = 10
+        checks.update()
+        self.assertIn("Video", checks.passed)
+        self.assertNotIn("Frames", checks.passed)
+        self.assertIsInstance(checks.failure, TimeoutError)
+        self.client.close.assert_called_once()
+
     def setUp(self):
         self.now = 0
         self.output = io.StringIO()

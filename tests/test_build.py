@@ -10,6 +10,42 @@ from scripts import build
 
 
 class BuildTests(unittest.TestCase):
+    def test_windows_bundle_contains_usb_runtime_and_only_deliverable_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "README.md").write_text("Readme", encoding="utf-8")
+            (root / "LICENSE").write_text("License", encoding="utf-8")
+            executable = root / "dist/windows/dji-goggles-bridge-windows.exe"
+            commands = []
+
+            def run(command):
+                commands.append(command)
+                if "PyInstaller" in command:
+                    executable.parent.mkdir(parents=True)
+                    executable.write_bytes(b"fake executable")
+
+            with (
+                patch.object(build, "ROOT", root),
+                patch.object(build.sys, "platform", "win32"),
+                patch.object(build.platform, "machine", return_value="AMD64"),
+                patch.object(build, "run", side_effect=run),
+            ):
+                self.assertEqual(build.main(["--skip-install"]), 0)
+            package = next(command for command in commands if "PyInstaller" in command)
+            collections = [
+                package[index + 1]
+                for index, value in enumerate(package)
+                if value == "--collect-all"
+            ]
+            self.assertIn("libusb_package", collections)
+            with build.zipfile.ZipFile(
+                root / "dist/dji-goggles-bridge-windows-x86_64.zip"
+            ) as archive:
+                self.assertEqual(
+                    set(archive.namelist()),
+                    {"dji-goggles-bridge-windows.exe", "README.md", "LICENSE"},
+                )
+
     def test_macos_embeds_libusb_and_archives_only_the_executable_and_documents(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

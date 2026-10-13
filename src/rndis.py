@@ -10,10 +10,10 @@ from __future__ import annotations
 import secrets
 import socket
 import struct
-import sys
 import time
 from collections import deque
-from pathlib import Path
+
+from usb_backend import load_usb
 
 USB_VENDOR = 0x2CA3
 USB_PRODUCT = 0x0020
@@ -83,37 +83,17 @@ class RndisUSB:
     @classmethod
     def open(cls):
         try:
-            import usb.backend.libusb1
-            import usb.core
-            import usb.util
-        except ImportError as exc:
-            raise RndisError('USB transport needs PyUSB: pip install ".[usb]"') from exc
-        backend = usb.backend.libusb1.get_backend()
-        if backend is None:
-            bundled = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
-            # ctypes discovery does not always include Homebrew's library path.
-            paths = [
-                *sorted(bundled.glob("libusb-1.0*.dylib")),
-                Path("/opt/homebrew/lib/libusb-1.0.dylib"),
-                Path("/usr/local/lib/libusb-1.0.dylib"),
-            ]
-            for path in paths:
-                if path.is_file():
-                    backend = usb.backend.libusb1.get_backend(find_library=lambda _: str(path))
-                    if backend is not None:
-                        break
-        if backend is None:
-            raise RndisError("libusb not found; on macOS install it with: brew install libusb")
+            core, util, backend = load_usb()
+        except RuntimeError as exc:
+            raise RndisError(str(exc)) from exc
         devices = list(
-            usb.core.find(
-                find_all=True, idVendor=USB_VENDOR, idProduct=USB_PRODUCT, backend=backend
-            )
+            core.find(find_all=True, idVendor=USB_VENDOR, idProduct=USB_PRODUCT, backend=backend)
         )
         if not devices:
             raise RndisError("Goggles 3 USB device not found; check the data cable and OTG setting")
         if len(devices) != 1:
             raise RndisError("Connect only one Goggles 3 for the USB transport")
-        adapter = cls(devices[0], usb.core, usb.util)
+        adapter = cls(devices[0], core, util)
         try:
             adapter._open()
         except Exception:
