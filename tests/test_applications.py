@@ -1,5 +1,6 @@
 """Check the applications use the real SDK, with a synthetic loopback headset."""
 
+import asyncio
 import io
 import threading
 import unittest
@@ -10,7 +11,7 @@ import test_decoder
 from helpers import video
 from test_client import Peer
 
-from apps import server, viewer
+from apps import server, viewer, webrtc
 from dji_goggles_bridge import GogglesClient
 
 
@@ -41,6 +42,35 @@ class ApplicationTests(unittest.TestCase):
         thread.start()
         self.addCleanup(stop.set)
         return stop, thread, errors
+
+    def test_webrtc_track_uses_real_sdk_and_releases_headset(self):
+        try:
+            import aiortc  # noqa: F401
+        except ImportError:
+            self.skipTest("Optional WebRTC dependencies not installed")
+        with Peer() as peer:
+            stop, thread, errors = self.start_source(peer)
+            client = GogglesClient(peer.config())
+
+            async def read():
+                source = webrtc.FrameSource(client, client.config)
+                track = webrtc.video_track(source)
+                source.start()
+                try:
+                    frame = await asyncio.wait_for(track.recv(), 3)
+                    self.assertEqual((frame.width, frame.height), (64, 48))
+                    self.assertEqual(frame.to_ndarray(format="bgr24").shape, (48, 64, 3))
+                finally:
+                    track.stop()
+                    await source.close()
+                self.assertFalse(source.thread.is_alive())
+
+            asyncio.run(read())
+            stop.set()
+            thread.join(2)
+            self.assertFalse(thread.is_alive())
+            self.assertFalse(client._thread.is_alive())
+            self.assertEqual(errors, [])
 
     def test_viewer_renders_numpy_and_releases_sdk_when_q_pressed(self):
         import cv2

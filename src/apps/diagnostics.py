@@ -294,7 +294,7 @@ class StreamChecks:
 
 @contextmanager
 def checked_frames(client, config, *, panel=None, notices=None):
-    """One SDK session and reader, shared by both apps on both operating systems."""
+    """One SDK session and reader, shared by the apps on both operating systems."""
     checks = StreamChecks(config, panel=panel, notices=notices)
     token = active_panel.set(checks.panel)
     failed = False

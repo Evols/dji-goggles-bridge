@@ -29,7 +29,7 @@ DJI FPV Goggles V2 (Air Unit / Vista / O3):
   Then enable Options > List All Devices, select Vision / Bulk Interface
   (Interface 3 / MI_03, USB 2ca3:001f), and install WinUSB on that interface.
   Select only that interface. V2 does not need the Goggles 3 OTG/Wi-Fi settings.
-  The menu detects V2; for direct commands use viewer/server --model v2.
+  The menu detects V2; for direct commands use viewer/server/webrtc --model v2.
   DJI FPV drone / Avata remain unverified. AV-IN and DJI Goggles 2 are not supported.
 """
 
@@ -127,6 +127,8 @@ def prepare_dependencies(mode: str, platform: str, options: list[str]) -> int | 
     required = ["av", "numpy"]
     if mode == "viewer":
         required.append("cv2")
+    if mode == "webrtc":
+        required.extend(["aiohttp", "aiortc"])
     required.append("usb")
     if platform == "win32":
         required.append("libusb_package")
@@ -155,6 +157,7 @@ def choose_mode() -> str | None:
         print("\nWhat would you like to do?")
         print("  1. Watch the goggles here")
         print("  2. Watch in VLC / OBS")
+        print("  3. Watch in a browser (WebRTC server)")
         print("  H. Help setting up the goggles")
         print("  Q. Quit")
         choice = input("Your choice [1]: ").strip().lower()
@@ -162,12 +165,14 @@ def choose_mode() -> str | None:
             return "viewer"
         if choice in ("2", "server"):
             return "server"
+        if choice in ("3", "webrtc"):
+            return "webrtc"
         if choice in ("q", "quit"):
             return None
         if choice in ("h", "help"):
             print("\n" + SETUP)
         else:
-            print("Choose 1, 2, H, or Q.")
+            print("Choose 1, 2, 3, H, or Q.")
 
 
 def after_attempt() -> str:
@@ -188,12 +193,24 @@ def _model_option(options):
     return parser.parse_known_args(options)[0].model
 
 
+def _receiver(mode):
+    if mode == "viewer":
+        from apps.viewer import main
+    elif mode == "webrtc":
+        from apps.webrtc import main
+    else:
+        from apps.server import main
+    return main
+
+
 def main(platform: str, argv=None) -> int:
     parser = argparse.ArgumentParser(
-        description="DJI Goggles Bridge: show video or serve it to VLC/OBS",
+        description="DJI Goggles Bridge: watch video, share with VLC/OBS, or serve WebRTC",
         epilog="Pass connection options after the mode; e.g. server --host 127.0.0.1.",
     )
-    parser.add_argument("mode", nargs="?", choices=("viewer", "server"), help="Omit for a menu")
+    parser.add_argument(
+        "mode", nargs="?", choices=("viewer", "server", "webrtc"), help="Omit for a menu"
+    )
     parser.add_argument("options", nargs=argparse.REMAINDER, help="Options passed to the receiver")
     args = parser.parse_args(argv)
     if sys.platform != platform:
@@ -222,14 +239,10 @@ def main(platform: str, argv=None) -> int:
             if ensure_mac_connection(args.options) is None:
                 return 0
         if args.mode is None and not interactive:
-            parser.error("Specify viewer or server when running without an interactive terminal")
+            parser.error("Specify viewer, server, or webrtc without an interactive terminal")
         # Receiver help should work without a headset or dependency installation.
         if help_requested:
-            if args.mode == "viewer":
-                from apps.viewer import main as receiver
-            else:
-                from apps.server import main as receiver
-            return receiver(args.options)
+            return _receiver(args.mode)(args.options)
 
         print("\nDJI Goggles Bridge", flush=True)
         mode = args.mode
@@ -238,7 +251,13 @@ def main(platform: str, argv=None) -> int:
                 mode = choose_mode()
             if mode is None:
                 return 0
-            print("\nWatching your goggles" if mode == "viewer" else "Sharing video with VLC / OBS")
+            print(
+                {
+                    "viewer": "\nWatching your goggles",
+                    "server": "\nSharing video with VLC / OBS",
+                    "webrtc": "\nSharing video in a browser with WebRTC",
+                }[mode]
+            )
             print(
                 "Close the video window or press Q / Escape to stop."
                 if mode == "viewer"
@@ -249,11 +268,7 @@ def main(platform: str, argv=None) -> int:
             if dependency_result is not None:
                 result = dependency_result
             else:
-                if mode == "viewer":
-                    from apps.viewer import main as receiver
-                else:
-                    from apps.server import main as receiver
-                result = receiver(args.options)
+                result = _receiver(mode)(args.options)
             if not interactive:
                 return result
             if not result:

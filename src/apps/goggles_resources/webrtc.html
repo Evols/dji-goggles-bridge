@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DJI Goggles Bridge</title>
+  <style>
+    body { margin: 0; background: #14181c; color: #f3f6f8; font: 16px system-ui, sans-serif; }
+    main { max-width: 1100px; margin: auto; padding: 24px; }
+    h1 { font-size: 24px; margin-bottom: 8px; }
+    p { color: #b9c5cf; }
+    video { display: block; width: 100%; background: black; aspect-ratio: 16 / 9; }
+    .controls { display: flex; gap: 12px; margin: 20px 0; }
+    button { border: 0; border-radius: 6px; padding: 12px 20px; font: inherit; cursor: pointer; }
+    #watch { background: #80d5ff; color: #101820; }
+    button:disabled { opacity: .45; cursor: default; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>DJI Goggles Bridge</h1>
+  <p>Live view over WebRTC. Keep the bridge running on your computer.</p>
+  <video id="video" autoplay playsinline muted controls></video>
+  <div class="controls">
+    <button id="watch">Watch live view</button>
+    <button id="stop" disabled>Stop</button>
+  </div>
+  <p id="status" role="status" aria-live="polite">Ready to connect. Video only; there is no audio.</p>
+</main>
+<script>
+  const video = document.getElementById('video');
+  const watch = document.getElementById('watch');
+  const stop = document.getElementById('stop');
+  const status = document.getElementById('status');
+  let peer = null;
+  let session = null;
+
+  function disconnect(message = 'Stopped. You can connect again.') {
+    const oldPeer = peer;
+    const oldSession = session;
+    peer = null;
+    session = null;
+    if (oldPeer) oldPeer.close();
+    if (oldSession) fetch(`/session/${oldSession}`, { method: 'DELETE', keepalive: true }).catch(() => {});
+    video.srcObject = null;
+    watch.disabled = false;
+    stop.disabled = true;
+    status.textContent = message;
+  }
+
+  function gatherIce(pc) {
+    if (pc.iceGatheringState === 'complete') return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => finish(new Error('Connection timed out. Try again.')), 10000);
+      function finish(error) {
+        clearTimeout(timer);
+        pc.removeEventListener('icegatheringstatechange', check);
+        pc.removeEventListener('connectionstatechange', check);
+        error ? reject(error) : resolve();
+      }
+      function check() {
+        if (pc.connectionState === 'closed') finish(new Error('Connection stopped.'));
+        else if (pc.iceGatheringState === 'complete') finish();
+      }
+      pc.addEventListener('icegatheringstatechange', check);
+      pc.addEventListener('connectionstatechange', check);
+      check();
+    });
+  }
+
+  watch.addEventListener('click', async () => {
+    watch.disabled = true;
+    stop.disabled = false;
+    status.textContent = 'Connecting to your goggles…';
+    let pc;
+    try {
+      pc = new RTCPeerConnection({ iceServers: [] });
+      peer = pc;
+      pc.addTransceiver('video', { direction: 'recvonly' });
+      pc.addEventListener('track', event => {
+        if (peer === pc) video.srcObject = new MediaStream([event.track]);
+      });
+      pc.addEventListener('connectionstatechange', () => {
+        if (peer !== pc) return;
+        if (pc.connectionState === 'connected') status.textContent = 'Connected. Waiting for live video…';
+        if (pc.connectionState === 'disconnected') status.textContent = 'Connection interrupted…';
+        if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+          const message = pc.iceConnectionState === 'failed'
+            ? 'Browser network connection failed. Connect again; check the bridge log if it persists.'
+            : 'Connection lost. Check the bridge and connect again.';
+          disconnect(message);
+        }
+      });
+      await pc.setLocalDescription(await pc.createOffer());
+      await gatherIce(pc);
+      if (peer !== pc) return;
+      const response = await fetch('/offer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sdp: pc.localDescription.sdp,
+          type: pc.localDescription.type,
+          defer_candidates: true
+        }),
+        signal: AbortSignal.timeout(20000)
+      });
+      if (!response.ok) throw new Error(await response.text());
+      const answer = await response.json();
+      if (peer !== pc) {
+        fetch(`/session/${answer.id}`, { method: 'DELETE' }).catch(() => {});
+        return;
+      }
+      session = answer.id;
+      await pc.setRemoteDescription({ sdp: answer.sdp, type: answer.type });
+      // Firefox publishes its mDNS candidate names after applying the answer.
+      // Let the server resolve them now, rather than before returning an answer.
+      if (answer.needs_ready && peer === pc) {
+        const ready = await fetch(`/session/${answer.id}/ready`, {
+          method: 'POST', signal: AbortSignal.timeout(15000)
+        });
+        if (!ready.ok) throw new Error(await ready.text());
+      }
+    } catch (error) {
+      if (!pc || peer === pc) disconnect(`Couldn't connect: ${error.message}`);
+    }
+  });
+  video.addEventListener('playing', () => { status.textContent = 'Live view is playing.'; });
+  stop.addEventListener('click', () => disconnect());
+  window.addEventListener('pagehide', () => disconnect());
+</script>
+</body>
+</html>

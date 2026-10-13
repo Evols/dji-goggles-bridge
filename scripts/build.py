@@ -36,7 +36,7 @@ def main(argv=None) -> int:
         if not python.is_file():
             run([sys.executable, "-m", "venv", str(ROOT / ".venv")])
         run([str(python), "-m", "pip", "install", ".[apps,exe]"])
-    modules = "import PyInstaller, av, numpy, cv2, usb"
+    modules = "import PyInstaller, av, numpy, cv2, usb, aiohttp, aiortc"
     if target == "windows":
         modules += ", libusb_package"
     run([str(python), "-c", modules])
@@ -65,6 +65,8 @@ def main(argv=None) -> int:
         str(ROOT / "build" / "specs"),
         "--collect-all",
         "av",
+        "--collect-all",
+        "aiortc",
         "--collect-data",
         "apps.goggles_resources",
     ]
@@ -86,8 +88,8 @@ def main(argv=None) -> int:
     run(command)
 
     executable = dist / (f"{name}.exe" if target == "windows" else name)
-    # Test the launcher plus both mode parsers without accessing hardware.
-    for options in (["--help"], ["viewer", "--help"], ["server", "--help"]):
+    # Test the launcher and all mode parsers without accessing hardware.
+    for options in (["--help"], ["viewer", "--help"], ["server", "--help"], ["webrtc", "--help"]):
         run([str(executable), *options])
 
     architecture = platform.machine().lower()

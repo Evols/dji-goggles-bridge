@@ -1,4 +1,4 @@
-"""Windows console launcher with headset setup, network check and two modes."""
+"""Windows console launcher with headset setup, network check and three modes."""
 
 import multiprocessing
 import sys

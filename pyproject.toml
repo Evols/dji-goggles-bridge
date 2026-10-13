@@ -16,13 +16,14 @@ dependencies = []
 [project.optional-dependencies]
 usb = ["pyusb>=1.3,<2", "libusb-package>=1.0,<2; sys_platform == 'win32'"]
 decode = ["av>=14,<20", "numpy>=1.26,<3"]
-apps = ["av>=14,<20", "numpy>=1.26,<3", "opencv-python>=4.10,<6", "pyusb>=1.3,<2", "libusb-package>=1.0,<2; sys_platform == 'win32'"]
+apps = ["av>=14,<20", "numpy>=1.26,<3", "opencv-python>=4.10,<6", "pyusb>=1.3,<2", "libusb-package>=1.0,<2; sys_platform == 'win32'", "aiohttp>=3.10,<4", "aiortc>=1.14,<2"]
 dev = ["ruff>=0.9,<1", "build>=1,<2"]
 exe = ["pyinstaller>=6,<7"]
 
 [project.scripts]
 goggles-view = "apps.viewer:main"
 goggles-serve = "apps.server:main"
+goggles-webrtc = "apps.webrtc:main"
 goggles-windows = "apps.windows_app:main"
 goggles-mac = "apps.mac_app:main"
 
@@ -32,7 +33,7 @@ py-modules = ["dji_goggles_bridge", "goggles_3", "goggles_v2", "decoder", "rndis
 packages = ["apps", "apps.goggles_resources"]
 
 [tool.setuptools.package-data]
-"apps.goggles_resources" = ["*.ps1"]
+"apps.goggles_resources" = ["*.ps1", "*.html"]
 
 [tool.setuptools.cmdclass]
 egg_info = "scripts.packaging_commands.EggInfo"

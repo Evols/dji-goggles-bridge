@@ -38,6 +38,7 @@ class BuildTests(unittest.TestCase):
                 if value == "--collect-all"
             ]
             self.assertIn("libusb_package", collections)
+            self.assertIn("aiortc", collections)
             with build.zipfile.ZipFile(
                 root / "dist/dji-goggles-bridge-windows-x86_64.zip"
             ) as archive:
@@ -85,6 +86,7 @@ class BuildTests(unittest.TestCase):
                     [str(executable), "--help"],
                     [str(executable), "viewer", "--help"],
                     [str(executable), "server", "--help"],
+                    [str(executable), "webrtc", "--help"],
                 ],
             )
             with build.tarfile.open(root / "dist" / f"{name}-arm64.tar.gz") as archive:

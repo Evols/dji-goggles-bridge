@@ -94,6 +94,7 @@ Follow the app's connection check, then choose:
 
 - **1** or **Enter**: watch the goggles here.
 - **2**: watch in VLC / OBS.
+- **3**: watch in a browser with the WebRTC server.
 - **H**: help setting up the goggles.
 - **Q**: quit.
 
@@ -107,7 +108,7 @@ Ready to watch!
 ```
 
 Close the video window, or press **Q / Escape** in it, to return to the menu.
-Stop VLC/OBS sharing with **Ctrl+C**. If an attempt fails, press **Enter** to retry,
+Stop VLC/OBS or WebRTC sharing with **Ctrl+C**. If an attempt fails, press **Enter** to retry,
 **B** to go back, or **Q** to quit. macOS also retries a lost video connection automatically.
 
 The picture includes any menus or OSD sent by the goggles. There is no audio.
@@ -137,6 +138,49 @@ Remote players may need incoming UDP allowed on that port. See `--help` for more
 Other softwares can also connect to the frame server.
 You are welcome to build your own, that uses the video feed from your drone.
 
+### WebRTC browser server
+
+Choose **3**, keep the bridge open, and open **http://127.0.0.1:8080** in a
+modern browser. Click **Watch live view** to connect. **Stop** disconnects that
+browser; **Ctrl+C** in the bridge stops the server and returns to the menu.
+Multiple browsers share one goggles connection. Video is decoded and re-encoded
+for WebRTC; slow viewers receive the latest picture rather than a growing backlog.
+Both Goggles 3 and V2 are supported. There is no audio.
+
+You can also start it directly:
+
+```bat
+dji-goggles-bridge-windows.exe webrtc --model v2
+```
+
+On macOS, use `./dji-goggles-bridge-macos webrtc` and add `--model v2` for V2.
+From a Python installation, install `.[apps]` and run `goggles-webrtc`.
+
+For browsers on the same local network:
+
+```bat
+dji-goggles-bridge-windows.exe webrtc --host 0.0.0.0 --port 8080
+```
+
+Open `http://BRIDGE_PC_IP:8080` on the other computer. `--host` is the server's
+listen address; `--port` is the HTTP player and signaling port. WebRTC video uses
+additional dynamically assigned UDP ports, so allow the bridge through the firewall
+on your private network. The default listens only on the bridge computer.
+LAN sharing has no login; use it on a trusted local network. This mode uses direct
+local/LAN connections without STUN or TURN and does not provide Internet relay hosting.
+
+Custom WebRTC clients can POST `{"sdp": "...", "type": "offer"}` to `/offer`
+with a video `recvonly` transceiver and completed ICE gathering. The JSON response
+contains the answer's `sdp`, `type`, and a session `id`. Apply the answer, then
+DELETE `/session/ID` when finished. See the bundled browser player for an example.
+Browser clients should also send `"defer_candidates": true` in the offer request.
+After applying the answer, POST `/session/ID/ready` if the response has
+`"needs_ready": true`. This lets Firefox publish its mDNS addresses before the
+server resolves them. Keep candidate and end-of-candidates lines in the offer;
+the bridge temporarily holds them until that ready request. Connection failures
+are recorded in `%TEMP%\dji-goggles-bridge.log` on Windows (the system temporary
+directory on macOS/Linux).
+
 ## If something isn't working
 
 For V2, check the goggles mode matching your air unit, a live picture, and the
@@ -150,6 +194,7 @@ to Goggles 3.
 | Sharing is on, but there's no picture | Check the live picture in the goggles, or enable Camera View Recording. Close other goggles apps. |
 | The picture stops | Check the cable and the picture in the goggles, then retry. |
 | VLC / OBS stays blank | Choose **2**, leave the bridge open, and check the player address above. |
+| Browser stays blank | Choose **3**, click Watch live view, and check the goggles' live picture. For LAN viewing, allow the bridge through the private-network firewall. |
 
 The app can detect missing video, but cannot read the sharing switch directly.
 "Sharing may be off" is a suggestion, not proof that the switch is off.

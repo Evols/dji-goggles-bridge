@@ -7,10 +7,44 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from apps import app_launcher, mac_app, server, viewer, windows_app
+from apps import app_launcher, mac_app, server, viewer, webrtc, windows_app
 
 
 class LauncherTests(unittest.TestCase):
+    def test_third_menu_option_runs_webrtc_with_detected_v2(self):
+        with (
+            patch.object(sys, "platform", "win32"),
+            patch.object(sys.stdin, "isatty", return_value=True),
+            patch.object(app_launcher, "check_windows_network", return_value=5),
+            patch.object(app_launcher, "prepare_dependencies", return_value=None),
+            patch.object(webrtc, "main", return_value=0) as receiver,
+            patch("builtins.input", side_effect=["3", "q"]),
+        ):
+            self.assertEqual(windows_app.main([]), 0)
+        receiver.assert_called_once_with(["--model", "v2"])
+
+    def test_direct_webrtc_passes_listen_and_model_options_on_both_platforms(self):
+        options = ["--host", "0.0.0.0", "--port", "8081", "--model", "v2"]
+        for platform, launcher in (("win32", windows_app), ("darwin", mac_app)):
+            with (
+                patch.object(sys, "platform", platform),
+                patch.object(app_launcher, "prepare_dependencies", return_value=None),
+                patch.object(webrtc, "main", return_value=0) as receiver,
+            ):
+                self.assertEqual(launcher.main(["webrtc", *options]), 0)
+            receiver.assert_called_once_with(options)
+
+    def test_source_webrtc_checks_its_optional_dependencies(self):
+        required = []
+        with patch.object(
+            app_launcher.importlib.util,
+            "find_spec",
+            side_effect=lambda name: required.append(name) or True,
+        ):
+            self.assertIsNone(app_launcher.prepare_dependencies("webrtc", "win32", []))
+        self.assertIn("aiohttp", required)
+        self.assertIn("aiortc", required)
+
     def test_windows_detected_v2_skips_network_setup_and_passes_model_to_receiver(self):
         with (
             patch.object(sys, "platform", "win32"),
@@ -257,13 +291,13 @@ class LauncherTests(unittest.TestCase):
         self.assertIn("Set up your goggles", output.getvalue())
         self.assertIn("Share Liveview", output.getvalue())
 
-    def test_both_mode_help_commands_need_no_hardware_or_dependencies(self):
+    def test_all_mode_help_commands_need_no_hardware_or_dependencies(self):
         with (
             patch.object(sys, "platform", "win32"),
             patch.object(app_launcher, "check_windows_network") as network,
             patch.object(app_launcher, "prepare_dependencies") as dependencies,
         ):
-            for mode in ("server", "viewer"):
+            for mode in ("server", "viewer", "webrtc"):
                 with self.assertRaises(SystemExit) as result:
                     windows_app.main([mode, "--help"])
                 self.assertEqual(result.exception.code, 0)
@@ -316,7 +350,7 @@ class LauncherTests(unittest.TestCase):
 
     def test_direct_source_help_works_without_site_packages(self):
         source = Path(__file__).resolve().parents[1] / "src" / "apps"
-        for entry in ("windows_app.py", "mac_app.py", "viewer.py", "server.py"):
+        for entry in ("windows_app.py", "mac_app.py", "viewer.py", "server.py", "webrtc.py"):
             result = subprocess.run(
                 [sys.executable, "-S", str(source / entry), "--help"],
                 capture_output=True,
