@@ -18,7 +18,7 @@ from pathlib import Path
 if __package__ in (None, "") and not getattr(sys, "frozen", False):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from apps.console import note, save_details, save_error
+from apps.console import active_panel, note, save_details, save_error
 from apps.diagnostics import checked_frames
 from apps.viewer import connection_arguments, connection_config
 from dji_goggles_bridge import GogglesClient
@@ -80,6 +80,7 @@ class FrameSource:
         self.latest = None
         self.sequence = 0
         self.error = None
+        self.panel = None
         self.thread = threading.Thread(target=self._read, name="webrtc-frames", daemon=True)
 
     def start(self):
@@ -90,6 +91,7 @@ class FrameSource:
         previous_pts = -1
         try:
             with checked_frames(self.client, self.config) as images:
+                self.panel = active_panel.get()
                 for image in images:
                     if self.stop.is_set():
                         break
@@ -324,12 +326,26 @@ async def run_server(config, host, port):
         await runner.setup()
         await web.TCPSite(runner, host, port).start()
         source.start()
-        address = "127.0.0.1" if host == "0.0.0.0" else host
-        if ":" in address:
-            address = f"[{address}]"
-        note(f"\nWebRTC player: http://{address}:{port}")
-        note("Open that address in your browser. Keep this app open. Ctrl+C stops sharing.\n")
-        await source.done.wait()
+        # A listening HTTP socket alone is not enough: wait for a usable
+        # picture before inviting the user to open the browser player.
+        try:
+            await source.next_image(-1)
+        except EOFError:
+            pass
+        if not source.done.is_set():
+            address = "127.0.0.1" if host == "0.0.0.0" else host
+            if ":" in address:
+                address = f"[{address}]"
+            # Print above the live panel so its next refresh keeps the URL visible.
+            token = active_panel.set(source.panel)
+            try:
+                note(f"\nWebRTC player: http://{address}:{port}")
+                note(
+                    "Open that address in your browser. Keep this app open. Ctrl+C stops sharing.\n"
+                )
+            finally:
+                active_panel.reset(token)
+            await source.done.wait()
         if source.error is not None:
             raise source.error
         raise RuntimeError("The goggles video stopped; retry the connection")

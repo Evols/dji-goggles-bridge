@@ -200,10 +200,46 @@ class WebRTCTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(webrtc, "GogglesClient", return_value=client),
             patch.object(webrtc, "checked_frames", side_effect=failure),
+            patch.object(webrtc, "note") as notes,
         ):
             with self.assertRaisesRegex(TimeoutError, "No headset reply"):
                 await asyncio.wait_for(webrtc.run_server(ConnectionConfig(), "127.0.0.1", 0), 3)
         client.close.assert_called_once()
+        notes.assert_not_called()
+
+    async def test_address_is_announced_once_after_first_picture_and_http_start(self):
+        started = asyncio.Event()
+        announced = asyncio.Event()
+
+        def note(message):
+            self.assertIs(webrtc.active_panel.get(), self.source.panel)
+            if "WebRTC player:" in message:
+                announced.set()
+
+        with (
+            patch.object(webrtc, "FrameSource", return_value=self.source),
+            patch.object(self.source, "start", side_effect=started.set),
+            patch.object(webrtc, "note", side_effect=note) as notes,
+        ):
+            self.source.panel = Mock()
+            server = asyncio.create_task(webrtc.run_server(ConnectionConfig(), "127.0.0.1", 0))
+            try:
+                await asyncio.wait_for(started.wait(), 2)
+                notes.assert_not_called()
+                self.publish()
+                await asyncio.wait_for(announced.wait(), 2)
+                self.publish(3000)
+                await asyncio.sleep(0)
+                addresses = [
+                    call.args[0]
+                    for call in notes.call_args_list
+                    if "WebRTC player:" in call.args[0]
+                ]
+                self.assertEqual(len(addresses), 1)
+                self.assertFalse(server.done(), "The server should keep running after announcing")
+            finally:
+                server.cancel()
+                await asyncio.gather(server, return_exceptions=True)
 
     async def test_http_bind_failure_closes_source_without_opening_headset(self):
         client = Mock()

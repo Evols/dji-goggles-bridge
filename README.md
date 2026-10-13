@@ -140,7 +140,8 @@ You are welcome to build your own, that uses the video feed from your drone.
 
 ### WebRTC browser server
 
-Choose **3**, keep the bridge open, and open **http://127.0.0.1:8080** in a
+Choose **3** and wait for the bridge to show the player address after live video
+is ready. Keep the bridge open, and open **http://127.0.0.1:8080** in a
 modern browser. Click **Watch live view** to connect. **Stop** disconnects that
 browser; **Ctrl+C** in the bridge stops the server and returns to the menu.
 Multiple browsers share one goggles connection. Video is decoded and re-encoded
