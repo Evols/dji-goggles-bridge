@@ -14,11 +14,11 @@ you're encouraged to keep it free and share it with the community.
 Get the archive for your computer from **[GitHub Releases](https://github.com/Evols/dji-goggles-bridge/releases)**,
 under **Assets**. Choose the application archive, rather than the source-code download.
 
-| Computer | Download |
-| --- | --- |
-| Windows, 64-bit | `dji-goggles-bridge-windows-x86_64.zip` |
-| Mac with Apple Silicon | `dji-goggles-bridge-macos-arm64.tar.gz` |
-| Mac with Intel | `dji-goggles-bridge-macos-x86_64.tar.gz` |
+| Computer               | Download                                 |
+|------------------------|------------------------------------------|
+| Windows, 64-bit        | `dji-goggles-bridge-windows-x86_64.zip`  |
+| Mac with Apple Silicon | `dji-goggles-bridge-macos-arm64.tar.gz`  |
+| Mac with Intel         | `dji-goggles-bridge-macos-x86_64.tar.gz` |
 
 **Windows:** extract the ZIP, then double-click `dji-goggles-bridge-windows.exe`.
 
