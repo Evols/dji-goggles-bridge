@@ -6,7 +6,8 @@ Add your FPV view to an OBS scene with overlays, a webcam, and your microphone.
 Other programs can also receive video from the frame server.
 Download a ready-to-run Windows or Mac app. The Python SDK supports Windows, macOS, and Linux.
 
-Free, software-only, and MIT licensed. No proprietary app, firmware, or license keys.
+Free, software-only, and CC BY 4.0 licensed (open-source with attribution).
+No proprietary app, firmware, or license keys.
 Independent project, not affiliated with DJI. If you build something with it,
 you're encouraged to keep it free and share it with the community.
 
@@ -315,3 +316,11 @@ use `--skip-install` with dependencies already installed.
 CI runs tests and builds Windows x64, Mac Apple Silicon, and Mac Intel applications.
 Publishing a GitHub Release builds its tag and attaches the three application archives
 under **Assets** once the builds finish. The builds are not notarized for macOS.
+
+## License and credit
+
+Licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); see [LICENSE](LICENSE).
+When sharing this project or a modified version, credit
+[DJI Goggles Bridge by Baptiste Hutteau and contributors](https://github.com/Evols/dji-goggles-bridge),
+keep the copyright and license notices, and indicate any changes.
+A short credit in your README, documentation, or About page works well.

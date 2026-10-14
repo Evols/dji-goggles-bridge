@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "A documented DJI Goggles 3 and FPV Goggles V2 H.264 and NumPy frame SDK"
 readme = "README.md"
 requires-python = ">=3.10"
-license = "MIT"
+license = "CC-BY-4.0"
 license-files = ["LICENSE"]
 keywords = ["dji", "goggles", "h264", "video", "rndis"]
 dependencies = []
