@@ -3,9 +3,11 @@
 import io
 import plistlib
 import subprocess
+import tempfile
 import threading
 import unittest
 from contextlib import redirect_stdout
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -82,6 +84,55 @@ class InventoryTests(unittest.TestCase):
                 checks.inspect_usb()
             self.assertNotIn("USB", checks.passed)
             self.assertIn(message, output.getvalue())
+
+    def test_linux_inventory_counts_supported_composite_devices(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            devices = root / "bus" / "usb" / "devices"
+            for name, vendor, product in [
+                ("1-1", "2ca3", "001f"),
+                ("2-1", "2CA3", "0020"),
+                ("3-1", "1234", "001f"),
+            ]:
+                device = devices / name
+                device.mkdir(parents=True)
+                (device / "idVendor").write_text(vendor + "\n")
+                (device / "idProduct").write_text(product + "\n")
+            (devices / "usb1").mkdir(parents=True)  # bus root entry, no id files
+            with patch.object(diagnostics, "SYS_ROOT", root):
+                self.assertEqual(diagnostics.usb_device_count("linux", model="all"), 2)
+                self.assertEqual(diagnostics.usb_device_count("linux", model="v2"), 1)
+                self.assertEqual(diagnostics.usb_device_count("linux"), 1)
+
+    def test_linux_inventory_raises_when_sysfs_unavailable(self):
+        with tempfile.TemporaryDirectory() as temp:
+            with patch.object(diagnostics, "SYS_ROOT", Path(temp)):
+                with self.assertRaises(OSError):
+                    diagnostics.usb_device_count("linux")
+
+    def test_linux_goggles_interface_finds_the_rndis_net_device(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            usb_device = root / "devices" / "platform" / "usb1" / "1-1"
+            net_path = usb_device / "1-1:1.4" / "net" / "usb0"
+            net_path.mkdir(parents=True)
+            (usb_device / "idVendor").write_text("2ca3\n")
+            (usb_device / "idProduct").write_text("0020\n")
+            net = root / "class" / "net"
+            net.mkdir(parents=True)
+            (net / "usb0").symlink_to(net_path)
+            (net / "eth0").mkdir()
+            with patch.object(diagnostics, "SYS_ROOT", root):
+                self.assertEqual(diagnostics.goggles_usb_interface(), "usb0")
+
+    def test_linux_goggles_interface_none_without_rndis(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            net = root / "class" / "net"
+            net.mkdir(parents=True)
+            (net / "lo").mkdir()
+            with patch.object(diagnostics, "SYS_ROOT", root):
+                self.assertIsNone(diagnostics.goggles_usb_interface())
 
 
 class ProgressTests(unittest.TestCase):

@@ -8,8 +8,12 @@ import sys
 import threading
 import time
 from contextlib import contextmanager
+from pathlib import Path
 
 from apps.console import StatusPanel, active_panel, save_details, save_error
+
+# Root of the kernel sysfs tree; overridable in tests.
+SYS_ROOT = Path("/sys")
 
 
 def usb_device_count(platform: str | None = None, *, model="goggles3") -> int | None:
@@ -45,6 +49,45 @@ def usb_device_count(platform: str | None = None, *, model="goggles3") -> int | 
             )
 
         return count(tree)
+    if platform == "linux":
+        return _linux_usb_device_count(products)
+    return None
+
+
+def _linux_usb_device_count(products: tuple[int, ...], *, root: Path | None = None) -> int:
+    """Count supported composite devices in the kernel sysfs USB tree."""
+    devices = (root or SYS_ROOT) / "bus" / "usb" / "devices"
+    if not devices.is_dir():
+        raise OSError("sysfs USB device tree unavailable")
+    wanted = {f"{product:04x}" for product in products}
+    count = 0
+    for entry in sorted(devices.iterdir()):
+        vendor = entry / "idVendor"
+        product = entry / "idProduct"
+        if not (vendor.is_file() and product.is_file()):
+            continue
+        if (
+            vendor.read_text().strip().lower() == "2ca3"
+            and product.read_text().strip().lower() in wanted
+        ):
+            count += 1
+    return count
+
+
+def goggles_usb_interface() -> str | None:
+    """Name of the network interface owned by a 2ca3 USB device (G3 RNDIS), if any."""
+    net = SYS_ROOT / "class" / "net"
+    if not net.is_dir():
+        return None
+    for entry in sorted(net.iterdir()):
+        try:
+            device = entry.resolve()
+        except OSError:
+            continue
+        for parent in (device, *device.parents):
+            vendor = parent / "idVendor"
+            if vendor.is_file() and vendor.read_text().strip().lower() == "2ca3":
+                return entry.name
     return None
 
 

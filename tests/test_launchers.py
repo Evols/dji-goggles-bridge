@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from apps import app_launcher, mac_app, server, viewer, webrtc, windows_app
+from apps import app_launcher, linux_app, mac_app, server, viewer, webrtc, windows_app
 
 
 class LauncherTests(unittest.TestCase):
@@ -284,6 +284,143 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(usb.call_count, 4)
         dependencies.assert_not_called()
 
+    def test_linux_launcher_rejects_other_platforms(self):
+        with patch.object(sys, "platform", "win32"):
+            self.assertEqual(linux_app.main(["viewer"]), 1)
+
+    def test_linux_direct_v2_skips_the_link_preflight(self):
+        with (
+            patch.object(sys, "platform", "linux"),
+            patch.object(app_launcher, "check_linux_goggles_link") as link_check,
+            patch.object(app_launcher, "prepare_dependencies", return_value=None),
+            patch.object(viewer, "main", return_value=0) as receiver,
+        ):
+            self.assertEqual(linux_app.main(["viewer", "--model", "v2"]), 0)
+        link_check.assert_not_called()
+        receiver.assert_called_once_with(["--model", "v2"])
+
+    def test_linux_direct_goggles3_blocks_when_the_link_is_not_ready(self):
+        output = io.StringIO()
+        with (
+            patch.object(sys, "platform", "linux"),
+            patch.object(sys.stdin, "isatty", return_value=False),
+            patch.object(app_launcher, "check_linux_goggles_link", return_value=3),
+            patch.object(sys, "stdout", output),
+            patch.object(app_launcher, "prepare_dependencies") as dependencies,
+            patch.object(viewer, "main") as receiver,
+        ):
+            self.assertEqual(linux_app.main(["viewer"]), 3)
+        dependencies.assert_not_called()
+        receiver.assert_not_called()
+        self.assertIn("isn't ready", output.getvalue())
+
+    def test_linux_menu_detects_v2_and_passes_it_to_the_receiver(self):
+        with (
+            patch.object(sys, "platform", "linux"),
+            patch.object(sys.stdin, "isatty", return_value=True),
+            patch("apps.diagnostics.usb_device_count", side_effect=[1, 1]),
+            patch.object(app_launcher, "_is_root", return_value=False),
+            patch.object(app_launcher, "prepare_dependencies", return_value=None),
+            patch.object(viewer, "main", return_value=0) as receiver,
+            patch("builtins.input", side_effect=["1", "q"]),
+        ):
+            self.assertEqual(linux_app.main(["viewer", "--port", "5601"]), 0)
+        receiver.assert_called_once_with(["--port", "5601", "--model", "v2"])
+
+    def test_linux_menu_v2_as_root_installs_udev_rules(self):
+        with (
+            patch.object(sys, "platform", "linux"),
+            patch.object(sys.stdin, "isatty", return_value=True),
+            patch("apps.diagnostics.usb_device_count", side_effect=[1, 1]),
+            patch.object(app_launcher, "_is_root", return_value=True),
+            patch.object(app_launcher, "install_linux_udev_rules", return_value=0) as udev,
+            patch.object(app_launcher, "prepare_dependencies", return_value=None),
+            patch.object(viewer, "main", return_value=0),
+            patch("builtins.input", side_effect=["1", "q"]),
+        ):
+            self.assertEqual(linux_app.main([]), 0)
+        udev.assert_called_once()
+
+    def test_linux_menu_goggles3_ready_skips_setup_and_reaches_the_menu(self):
+        with (
+            patch.object(sys, "platform", "linux"),
+            patch.object(sys.stdin, "isatty", return_value=True),
+            patch("apps.diagnostics.usb_device_count", side_effect=[1, 0]),
+            patch.object(app_launcher, "_linux_local_ip_configured", return_value=True),
+            patch.object(app_launcher, "prepare_dependencies") as dependencies,
+            patch("builtins.input", side_effect=["q"]),
+        ):
+            self.assertEqual(linux_app.main([]), 0)
+        dependencies.assert_not_called()
+
+    def test_linux_menu_root_offers_one_time_setup_and_rechecks(self):
+        output = io.StringIO()
+        with (
+            patch.object(sys, "platform", "linux"),
+            patch.object(sys.stdin, "isatty", return_value=True),
+            patch("apps.diagnostics.usb_device_count", side_effect=[1, 0, 1, 0]),
+            patch.object(app_launcher, "_linux_local_ip_configured", side_effect=[False, True]),
+            patch.object(app_launcher, "_is_root", return_value=True),
+            patch.object(app_launcher, "setup_linux_goggles_link", return_value=0) as setup,
+            patch.object(sys, "stdout", output),
+            patch.object(app_launcher, "prepare_dependencies") as dependencies,
+            patch("builtins.input", side_effect=["y", "q"]),
+        ):
+            self.assertEqual(linux_app.main([]), 0)
+        dependencies.assert_not_called()
+        setup.assert_called_once()
+        self.assertIn("one-time setup", output.getvalue())
+        self.assertIn("Checking your goggles again...", output.getvalue())
+
+    def test_linux_menu_nonroot_shows_instructions_and_retries_until_ready(self):
+        output = io.StringIO()
+        with (
+            patch.object(sys, "platform", "linux"),
+            patch.object(sys.stdin, "isatty", return_value=True),
+            patch("apps.diagnostics.usb_device_count", side_effect=[1, 0, 1, 0]),
+            patch.object(app_launcher, "_linux_local_ip_configured", side_effect=[False, True]),
+            patch.object(app_launcher, "_is_root", return_value=False),
+            patch.object(app_launcher, "setup_linux_goggles_link") as setup,
+            patch.object(sys, "stdout", output),
+            patch.object(app_launcher, "prepare_dependencies") as dependencies,
+            patch("builtins.input", side_effect=["", "q"]),
+        ):
+            self.assertEqual(linux_app.main([]), 0)
+        dependencies.assert_not_called()
+        setup.assert_not_called()
+        self.assertIn("sudo ip addr add 192.168.60.1/24", output.getvalue())
+
+    def test_linux_menu_without_headset_can_quit(self):
+        with (
+            patch.object(sys, "platform", "linux"),
+            patch.object(sys.stdin, "isatty", return_value=True),
+            patch("apps.diagnostics.usb_device_count", return_value=0),
+            patch.object(app_launcher, "prepare_dependencies") as dependencies,
+            patch("builtins.input", side_effect=["q"]),
+        ):
+            self.assertEqual(linux_app.main([]), 0)
+        dependencies.assert_not_called()
+
+    def test_linux_custom_local_ip_skips_the_link_check(self):
+        with patch("apps.diagnostics.usb_device_count") as count:
+            self.assertEqual(app_launcher.check_linux_goggles_link(["--local-ip", "127.0.0.1"]), 0)
+        count.assert_not_called()
+
+    def test_source_restart_relaunches_the_linux_launcher_on_linux(self):
+        with (
+            patch.object(app_launcher.importlib.util, "find_spec", return_value=None),
+            patch.object(Path, "is_file", return_value=True),
+            patch.object(sys, "executable", str(Path(".local/other-python").resolve())),
+            patch.object(sys, "prefix", str(Path(".local/other-prefix").resolve())),
+            patch.object(app_launcher.subprocess, "run", return_value=Mock(returncode=7)) as run,
+        ):
+            self.assertEqual(
+                app_launcher.prepare_dependencies("server", "linux", ["--port", "5601"]), 7
+            )
+        command = run.call_args.args[0]
+        self.assertTrue(command[1].endswith("linux_app.py"))
+        self.assertEqual(command[2:], ["server", "--port", "5601"])
+
     def test_setup_help_is_available_without_starting_a_receiver(self):
         output = io.StringIO()
         with patch("builtins.input", side_effect=["h", "q"]), patch.object(sys, "stdout", output):
@@ -350,7 +487,14 @@ class LauncherTests(unittest.TestCase):
 
     def test_direct_source_help_works_without_site_packages(self):
         source = Path(__file__).resolve().parents[1] / "src" / "apps"
-        for entry in ("windows_app.py", "mac_app.py", "viewer.py", "server.py", "webrtc.py"):
+        for entry in (
+            "windows_app.py",
+            "mac_app.py",
+            "linux_app.py",
+            "viewer.py",
+            "server.py",
+            "webrtc.py",
+        ):
             result = subprocess.run(
                 [sys.executable, "-S", str(source / entry), "--help"],
                 capture_output=True,

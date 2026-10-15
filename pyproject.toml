@@ -26,6 +26,7 @@ goggles-serve = "apps.server:main"
 goggles-webrtc = "apps.webrtc:main"
 goggles-windows = "apps.windows_app:main"
 goggles-mac = "apps.mac_app:main"
+goggles-linux = "apps.linux_app:main"
 
 [tool.setuptools]
 package-dir = {"" = "src", "scripts" = "scripts"}

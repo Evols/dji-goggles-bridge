@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import os
+import socket
 import subprocess
 import sys
 from importlib.resources import as_file, files
@@ -31,6 +33,9 @@ DJI FPV Goggles V2 (Air Unit / Vista / O3):
   Select only that interface. V2 does not need the Goggles 3 OTG/Wi-Fi settings.
   The menu detects V2; for direct commands use viewer/server/webrtc --model v2.
   DJI FPV drone / Avata remain unverified. AV-IN and DJI Goggles 2 are not supported.
+
+  Linux: Goggles 3 use the kernel RNDIS interface (usually usb0); running the
+  app as root offers a one-time setup (udev rules + link address). V2 needs libusb.
 """
 
 
@@ -120,6 +125,158 @@ def ensure_mac_connection(options=None) -> int | None:
             return None
 
 
+def _linux_local_ip_configured(ip: str) -> bool:
+    """True when the IP is assigned to a local interface (bindable by the SDK)."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.bind((ip, 0))
+        return True
+    except OSError:
+        return False
+    finally:
+        sock.close()
+
+
+def _is_root() -> bool:
+    geteuid = getattr(os, "geteuid", None)
+    return bool(geteuid and geteuid() == 0)
+
+
+# udev rules installed by the one-time Linux setup: rootless V2 USB access,
+# G3 auto-IP on every plug-in, and NM_UNMANAGED so NetworkManager leaves the link.
+LINUX_UDEV_RULES = """\
+SUBSYSTEM=="usb", ATTR{idVendor}=="2ca3", ATTR{idProduct}=="001f", MODE="0666"
+SUBSYSTEM=="net", ACTION=="add", ATTRS{idVendor}=="2ca3", ATTRS{idProduct}=="0020", ENV{NM_UNMANAGED}="1", ENV{NM_AUTOCONNECT}="no", RUN+="/bin/sh -c 'ip -4 addr show dev %E{interface} 2>/dev/null | grep -q 192.168.60.1 || { ip link set %E{interface} up; ip addr add 192.168.60.1/24 dev %E{interface}; }'"
+"""
+
+LINUX_UDEV_RULES_PATH = Path("/etc/udev/rules.d/99-dji-goggles.rules")
+
+
+def install_linux_udev_rules(path: Path = LINUX_UDEV_RULES_PATH) -> int:
+    """Write the goggles udev rules and reload udev; no-op when already installed."""
+    if path.exists() and path.read_text() == LINUX_UDEV_RULES:
+        return 0
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(LINUX_UDEV_RULES)
+    except OSError as exc:
+        save_details(f"udev rule install failed: {exc}")
+        print(f"Could not install the udev rules: {exc}")
+        return 1
+    subprocess.run(["udevadm", "control", "--reload-rules"], check=False, capture_output=True)
+    print("Installed udev rules for the goggles.")
+    return 0
+
+
+def check_linux_goggles_link(options: list[str] | None = None) -> int:
+    """Read-only G3 link check. 0 ready/custom IP, 1 no single G3, 2/3 address missing (root/user), 5 V2 only."""
+    if options and any(opt == "--local-ip" or opt.startswith("--local-ip=") for opt in options):
+        return 0  # Custom network configuration; nothing to set up
+    from apps.diagnostics import usb_device_count
+
+    try:
+        count = usb_device_count("linux", model="all")
+    except (OSError, ValueError):
+        return 0  # Inventory unavailable; try the connection anyway
+    if count == 0 or count > 1:
+        return 1
+    try:
+        if usb_device_count("linux", model="v2") == 1:
+            return 5
+    except (OSError, ValueError):
+        pass
+    if _linux_local_ip_configured("192.168.60.1"):
+        return 0
+    return 2 if _is_root() else 3
+
+
+def setup_linux_goggles_link() -> int:
+    """One-time Linux setup: install the udev rules and assign the G3 link address."""
+    if install_linux_udev_rules():
+        return 1
+    from apps.diagnostics import goggles_usb_interface
+
+    interface = goggles_usb_interface()
+    if interface is None:
+        print("Goggles 3 not connected; the udev rules will set the link on next plug-in.")
+        return 0
+    if _linux_local_ip_configured("192.168.60.1"):
+        print("192.168.60.1 is already on a local interface; udev rules are installed.")
+        return 0
+    command = ["ip", "addr", "add", "192.168.60.1/24", "dev", interface]
+    try:
+        subprocess.run(["ip", "link", "set", interface, "up"], check=False, capture_output=True)
+        result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError) as exc:
+        save_details(f"Linux link setup failed to run: {exc}")
+        print("The setup command could not be run. See the log for details.")
+        return 1
+    if result.returncode:
+        save_details(f"ip addr add {interface}: {result.stderr.strip()}")
+        print(f"Setup failed: {result.stderr.strip() or 'unknown error'}")
+        print(f"You can run it manually: sudo {' '.join(command)}")
+        return 1
+    # NM_UNMANAGED via udev is permanent; also stop NM for the current session.
+    try:
+        subprocess.run(
+            ["nmcli", "device", "set", interface, "managed", "no"], check=False, capture_output=True
+        )
+    except OSError:
+        pass
+    print(f"Assigned 192.168.60.1 to {interface}.")
+    return 0
+
+
+def _print_linux_link_instructions() -> None:
+    from apps.diagnostics import goggles_usb_interface
+
+    interface = goggles_usb_interface() or "usb0"
+    print("\nThe goggles link needs a one-time address on Linux:")
+    print(f"  sudo ip addr add 192.168.60.1/24 dev {interface}")
+
+
+def ensure_linux_connection(
+    can_prompt: bool, options: list[str] | None = None, *, retry_missing: bool = False
+) -> int | None:
+    """Check the G3 link and offer the one-time setup. 0 ready, 5 V2 only, None quit."""
+    while True:
+        print("Checking your goggles connection...", flush=True)
+        result = check_linux_goggles_link(options)
+        if result not in (1, 3) or not retry_missing:
+            break
+        if result == 1:
+            print("\nYour goggles aren't ready yet.")
+            print("Connect exactly one headset with a USB data cable.")
+            print("Goggles 3: turn on OTG Wired Connection. V2: link the air unit.")
+        else:
+            _print_linux_link_instructions()
+        if input("Press Enter to check again, or Q to quit: ").strip().lower() == "q":
+            return None
+    if result == 5 and _is_root():
+        # V2 works now as root; install the rules so later runs work without it.
+        install_linux_udev_rules()
+    if result == 2:
+        print("\nLinux needs a one-time setup for your goggles.")
+        print(
+            "This installs the udev rules and assigns 192.168.60.1 to the goggles network interface."
+        )
+        if not can_prompt:
+            print("Open the app in a terminal to approve setup.")
+            return result
+        if input("Set up the goggles connection now? [y/N]: ").strip().lower() not in ("y", "yes"):
+            print("Setup skipped. You can open the app again when you're ready.")
+            return result
+        print("Setting up your goggles connection...", flush=True)
+        if setup_linux_goggles_link():
+            print("Setup wasn't finished. Open the app again to retry, or see the README for help.")
+            return 1
+        print("Checking your goggles again...", flush=True)
+        return check_linux_goggles_link(options)
+    if result == 3:
+        _print_linux_link_instructions()
+    return result
+
+
 def prepare_dependencies(mode: str, platform: str, options: list[str]) -> int | None:
     """Bootstrap a source checkout; frozen apps never invoke pip or Python."""
     if getattr(sys, "frozen", False):
@@ -148,7 +305,8 @@ def prepare_dependencies(mode: str, platform: str, options: list[str]) -> int | 
         subprocess.run([str(python), "-m", "pip", "install", ".[apps]"], cwd=root, check=True)
         return None
     # Re-run in the project's environment; that process installs anything missing.
-    entry = root / "src" / "apps" / ("windows_app.py" if platform == "win32" else "mac_app.py")
+    launchers = {"win32": "windows_app.py", "darwin": "mac_app.py", "linux": "linux_app.py"}
+    entry = root / "src" / "apps" / launchers.get(platform, "mac_app.py")
     return subprocess.run([str(python), str(entry), mode, *options], check=False).returncode
 
 
@@ -214,7 +372,10 @@ def main(platform: str, argv=None) -> int:
     parser.add_argument("options", nargs=argparse.REMAINDER, help="Options passed to the receiver")
     args = parser.parse_args(argv)
     if sys.platform != platform:
-        print("Use windows_app.py on Windows or mac_app.py on macOS.", file=sys.stderr)
+        print(
+            "Use windows_app.py on Windows, mac_app.py on macOS, or linux_app.py on Linux.",
+            file=sys.stderr,
+        )
         return 1
 
     can_prompt = sys.stdin.isatty()
@@ -238,6 +399,21 @@ def main(platform: str, argv=None) -> int:
         elif platform == "darwin" and interactive:
             if ensure_mac_connection(args.options) is None:
                 return 0
+        elif platform == "linux" and not help_requested and requested_model != "v2":
+            result = ensure_linux_connection(can_prompt, args.options, retry_missing=interactive)
+            if result == 5 and requested_model is None:
+                args.options.extend(["--model", "v2"])
+                result = 0
+            if result is None:
+                return 0
+            if result:
+                if result == 1:
+                    print("Connect exactly one headset with a USB data cable.")
+                    print("Goggles 3: turn on OTG Wired Connection. V2: link the air unit.")
+                print("The goggles connection isn't ready yet.")
+                if interactive:
+                    input("Press Enter to close...")
+                return result
         if args.mode is None and not interactive:
             parser.error("Specify viewer, server, or webrtc without an interactive terminal")
         # Receiver help should work without a headset or dependency installation.
@@ -284,6 +460,15 @@ def main(platform: str, argv=None) -> int:
                 print("\nTrying again...", flush=True)
                 if platform == "win32" and _model_option(args.options) != "v2":
                     result = ensure_windows_network(can_prompt, retry_missing=True)
+                    if result == 5 and _model_option(args.options) is None:
+                        args.options.extend(["--model", "v2"])
+                        result = 0
+                    if result is None:
+                        return 0
+                    if result:
+                        return result
+                elif platform == "linux" and _model_option(args.options) != "v2":
+                    result = ensure_linux_connection(can_prompt, args.options, retry_missing=True)
                     if result == 5 and _model_option(args.options) is None:
                         args.options.extend(["--model", "v2"])
                         result = 0
